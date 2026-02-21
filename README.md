@@ -137,7 +137,7 @@ python video_to_dataset.py --input data_videos --output data --timesteps 30 --st
 ### Step 7: เทรนโมเดลรอบใหม่
 
 ```bash
-python train.py --data-dir data --epochs 30 --batch-size 32 --out models/lstm_fall_model_v2.h5
+python train.py --data-dir data --epochs 30 --batch-size 32 --out models/lstm_fall_model_v2.h5 --eval-dir work_csv --labels Fall,No_Fall,Pre-Fall,Falling
 ```
 
 ### Step 8: Deploy และรัน real-time (Pi Camera)
@@ -175,6 +175,11 @@ powershell -ExecutionPolicy Bypass -File tools/run_auto_label_pipeline.ps1 -Vide
 - `data/X.npy` เป็น 3 มิติ และ `X.shape[2] == 150`
 - ตรวจ `data/class_map.json` ว่า order ตรงกับ `--labels`
 - เทรนแล้วได้ `models/lstm_fall_model_v2.h5`
+- ได้ metric report ที่ `work_csv/`:
+  - `confusion_matrix.csv`
+  - `classification_report.json`
+  - `classification_report.txt`
+  - `metrics_summary.json` (รวม accuracy, precision, recall, f1)
 - รัน `main.py` แล้วพยากรณ์ได้ต่อเนื่อง
 
 ## 9) หมายเหตุ

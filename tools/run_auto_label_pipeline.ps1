@@ -60,7 +60,9 @@ if ($RunTrain) {
       --data-dir data `
       --epochs $TrainEpochs `
       --batch-size $TrainBatchSize `
-      --out $TrainOut
+      --out $TrainOut `
+      --eval-dir work_csv `
+      --labels $Labels
 }
 else {
     Write-Host "[6/6] Skipped training (use -RunTrain to enable)."
