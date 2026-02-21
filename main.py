@@ -20,6 +20,47 @@ except ImportError:
     get_iriun_camera = None
 
 
+DEFAULT_LABELS = "Fall,No_Fall,Pre-Fall,Falling"
+
+
+def parse_labels(raw_labels):
+    labels = [x.strip() for x in (raw_labels or "").split(",") if x.strip()]
+    if not labels:
+        raise ValueError("At least one class label is required")
+    return labels
+
+
+def parse_labels_or_empty(raw_labels):
+    return [x.strip() for x in (raw_labels or "").split(",") if x.strip()]
+
+
+def parse_env_int(name, default):
+    value = os.getenv(name)
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def load_env_defaults():
+    # Support both standard .env and existing .evnv files.
+    for path in (".env", ".evnv"):
+        if not os.path.exists(path):
+            continue
+        with open(path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip("'\"")
+                if key:
+                    os.environ.setdefault(key, value)
+
+
 def send_line_alert(channel_access_token, message, to_user_id=None, timeout=10):
     if not channel_access_token:
         raise ValueError("LINE channel access token is required")
@@ -94,20 +135,23 @@ def open_camera(camera_mode, source):
 
 
 def main():
+    load_env_defaults()
+
     parser = argparse.ArgumentParser(description="Pose+Hand fall detection runtime")
     parser.add_argument(
         "--camera",
-        default="iriun",
+        default=os.getenv("CAMERA_MODE", "pi"),
         choices=["iriun", "pi", "rtsp", "index"],
         help="Camera source mode",
     )
     parser.add_argument(
         "--source",
+        default=os.getenv("CAMERA_SOURCE"),
         help="RTSP URL for --camera rtsp, or camera index for --camera index",
     )
     parser.add_argument(
         "--model",
-        default="models/lstm_fall_model.h5",
+        default=os.getenv("MODEL_PATH", "models/lstm_fall_model.h5"),
         help="Path to trained model (.h5/.keras)",
     )
     parser.add_argument(
@@ -123,13 +167,18 @@ def main():
     parser.add_argument(
         "--line-cooldown-seconds",
         type=int,
-        default=60,
+        default=parse_env_int("LINE_COOLDOWN_SECONDS", 60),
         help="Minimum seconds between LINE alerts.",
     )
     parser.add_argument(
         "--alert-classes",
-        default="Fall",
+        default=os.getenv("ALERT_CLASSES", "Fall"),
         help="Comma-separated class names that should trigger LINE alerts.",
+    )
+    parser.add_argument(
+        "--labels",
+        default=os.getenv("LABELS", DEFAULT_LABELS),
+        help="Comma-separated class names in model output order.",
     )
     args = parser.parse_args()
 
@@ -138,12 +187,8 @@ def main():
     model = load_model(args.model)
     sequence_buffer = []
 
-    gesture_labels = {
-        0: "Fall",
-        1: "No Fall",
-        2: "Pre-Fall",
-        3: "Falling",
-    }
+    label_names = parse_labels(args.labels)
+    gesture_labels = {i: name for i, name in enumerate(label_names)}
 
     pose_model_path = "models/pose_landmarker_lite.task"
     hand_model_path = "models/hand_landmarker.task"
@@ -202,7 +247,7 @@ def main():
 
     line_color = (0, 255, 0)
     point_color = (0, 255, 0)
-    alert_classes = {x.strip() for x in args.alert_classes.split(",") if x.strip()}
+    alert_classes = set(parse_labels_or_empty(args.alert_classes))
     last_alert_time = 0.0
 
     cap = open_camera(args.camera, args.source)

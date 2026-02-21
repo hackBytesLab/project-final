@@ -1,5 +1,6 @@
 import os
 import argparse
+import json
 import numpy as np
 import cv2
 import mediapipe as mp
@@ -8,6 +9,7 @@ from mediapipe.tasks.python import vision
 
 POSE_MODEL_PATH = 'models/pose_landmarker_lite.task'
 HAND_MODEL_PATH = 'models/hand_landmarker.task'
+DEFAULT_LABELS = 'Fall,No_Fall,Pre-Fall,Falling'
 
 
 def create_detectors():
@@ -52,18 +54,29 @@ def extract_frame_features(frame, pose_detector, hand_detector):
     return features
 
 
-def process_videos(input_dir, output_dir, timesteps=30, step=15):
+def parse_labels(raw_labels):
+    labels = [x.strip() for x in (raw_labels or '').split(',') if x.strip()]
+    if not labels:
+        raise ValueError('At least one label is required in --labels')
+    return labels
+
+
+def process_videos(input_dir, output_dir, timesteps=30, step=15, labels=None):
     pose_detector, hand_detector = create_detectors()
-    classes = sorted([d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))])
+    classes = labels if labels else sorted([d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))])
     if not classes:
         raise ValueError('No class subfolders found in input directory')
 
     X = []
     y = []
     class_map = {cls: idx for idx, cls in enumerate(classes)}
+    sample_counts = {cls: 0 for cls in classes}
 
     for cls in classes:
         cls_dir = os.path.join(input_dir, cls)
+        if not os.path.isdir(cls_dir):
+            print(f"Warning: class folder not found, skipped: {cls_dir}")
+            continue
         for fname in os.listdir(cls_dir):
             if not fname.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
                 continue
@@ -93,6 +106,7 @@ def process_videos(input_dir, output_dir, timesteps=30, step=15):
                 seq = frames_features[i:i + timesteps]
                 X.append(seq)
                 y.append(class_map[cls])
+                sample_counts[cls] += 1
 
             print(f"Processed {path}: frames={n_frames}, samples={(n_frames - timesteps + 1 + (step-1))//step}")
 
@@ -102,11 +116,16 @@ def process_videos(input_dir, output_dir, timesteps=30, step=15):
     os.makedirs(output_dir, exist_ok=True)
     np.save(os.path.join(output_dir, 'X.npy'), X)
     np.save(os.path.join(output_dir, 'y.npy'), y)
+    with open(os.path.join(output_dir, 'class_map.json'), 'w', encoding='utf-8') as f:
+        json.dump(class_map, f, ensure_ascii=False, indent=2)
 
     print('Saved dataset ->', output_dir)
     print('Classes:', class_map)
     print('X shape:', X.shape)
     print('y shape:', y.shape)
+    for cls, count in sample_counts.items():
+        if count == 0:
+            print(f"Warning: no training samples produced for class '{cls}'")
 
 
 def main():
@@ -115,9 +134,11 @@ def main():
     parser.add_argument('--output', default='data', help='Output folder to save X.npy and y.npy')
     parser.add_argument('--timesteps', type=int, default=30)
     parser.add_argument('--step', type=int, default=15, help='Sliding window step (default 50%% overlap)')
+    parser.add_argument('--labels', default=DEFAULT_LABELS, help='Comma-separated class names in fixed output order')
 
     args = parser.parse_args()
-    process_videos(args.input, args.output, timesteps=args.timesteps, step=args.step)
+    labels = parse_labels(args.labels) if args.labels else None
+    process_videos(args.input, args.output, timesteps=args.timesteps, step=args.step, labels=labels)
 
 
 if __name__ == '__main__':
