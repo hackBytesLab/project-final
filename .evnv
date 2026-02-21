@@ -1,0 +1,12 @@
+# Runtime / model defaults
+MODEL_PATH=models/lstm_fall_model.h5
+CAMERA_MODE=iriun
+CAMERA_SOURCE=
+
+# Sequence / dataset defaults
+TIMESTEPS=30
+STEP=15
+BATCH_SIZE=32
+
+# Class labels (id order)
+LABELS=Fall,No_Fall,Pre-Fall,Falling

@@ -1,36 +1,53 @@
 # Fall Detection - Project Final
 
-โปรเจกต์นี้ใช้ MediaPipe Pose + Hand landmarks แปลงวิดีโอเป็น sequence features แล้วเทรนโมเดล LSTM เพื่อแยกคลาส:
+โปรเจกต์นี้ใช้ MediaPipe (Pose + Hand) เพื่อดึง landmark จากวิดีโอ แล้วเทรนโมเดล LSTM สำหรับแยกคลาส:
 - `Fall`
 - `No_Fall`
 - `Pre-Fall`
 - `Falling`
 
-## 1) ติดตั้ง
+## การติดตั้ง
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Dependencies หลักใน `requirements.txt`:
+แพ็กเกจหลัก:
 - `tensorflow`
 - `mediapipe`
 - `opencv-python`
 - `numpy`
 - `scikit-learn`
 
-## 2) โครงสร้างไฟล์สำคัญ
+## โครงสร้างไฟล์สำคัญ
 
-- `video_to_dataset.py`: แปลงวิดีโอที่แยกคลาสแล้วเป็น `X.npy` / `y.npy`
+- `main.py`: รันตรวจจับแบบ real-time จากกล้อง/สตรีม
+- `video_to_dataset.py`: แปลงวิดีโอที่ติดป้ายแล้วเป็น `X.npy`, `y.npy`
 - `train.py`: เทรนโมเดล LSTM
-- `infer_video.py`: ใช้โมเดลที่เทรนแล้วแยกคลาสจากวิดีโอยาว และ export segments
-- `main.py`: รัน real-time detection จากกล้อง
-- `lstm_model.py`: นิยามโมเดลและฟังก์ชันพยากรณ์
-- `models/pose_landmarker_lite.task`, `models/hand_landmarker.task`: MediaPipe task files
+- `infer_video.py`: แยกคลาสจากวิดีโอยาวและส่งออกช่วงเวลาเป็น CSV
+- `lstm_model.py`: นิยามโมเดล
+- `Iriun_Webcam.py`: helper สำหรับ Iriun webcam
 
-## 3) เตรียมข้อมูลวิดีโอสำหรับเทรน
+ไฟล์โมเดล MediaPipe ที่ต้องมีใน `models/`:
+- `pose_landmarker_lite.task`
+- `hand_landmarker.task`
 
-ต้องจัดวางวิดีโอแยกโฟลเดอร์ตามคลาสก่อน เช่น:
+## ไฟล์ตั้งค่า `.evnv`
+
+ในโปรเจกต์มีไฟล์ `.evnv` สำหรับเก็บค่า default เช่น:
+- `MODEL_PATH`
+- `CAMERA_MODE`
+- `CAMERA_SOURCE`
+- `TIMESTEPS`
+- `STEP`
+- `BATCH_SIZE`
+- `LABELS`
+
+หมายเหตุ: ตอนนี้สคริปต์ยังไม่ได้อ่าน `.evnv` อัตโนมัติ ใช้เป็นค่าอ้างอิงเวลาใส่ argument
+
+## 1) เตรียมวิดีโอที่ติดป้ายคลาส
+
+จัดไฟล์แบบแยกโฟลเดอร์ต่อคลาส:
 
 ```text
 data_videos/
@@ -44,55 +61,59 @@ data_videos/
     falling_001.mp4
 ```
 
-จากนั้นแปลงเป็น dataset:
+## 2) แปลงวิดีโอเป็น Dataset
 
 ```bash
 python video_to_dataset.py --input data_videos --output data --timesteps 30 --step 15
 ```
 
 ผลลัพธ์:
-- `data/X.npy` shape `(n_samples, timesteps, num_features)`
-- `data/y.npy` shape `(n_samples,)`
+- `data/X.npy` รูปแบบ `(n_samples, timesteps, num_features)`
+- `data/y.npy` รูปแบบ `(n_samples,)`
 
-ค่าเริ่มต้น:
+ค่าเริ่มต้นที่ใช้ในโปรเจกต์:
 - `timesteps=30`
-- `num_features=150` (pose 33 จุด x,y + hand 2 มือ x 21 จุด x,y)
+- `num_features=150`
 
-## 4) เทรนโมเดล
+## 3) เทรนโมเดล
 
 ```bash
 python train.py --data-dir data --epochs 30 --batch-size 32 --out models/lstm_fall_model.h5
 ```
 
-โมเดลที่ดีที่สุดจะถูกบันทึกไปที่ `--out`
-
-### สร้างข้อมูลตัวอย่าง (ทดสอบ pipeline)
+ทดสอบ pipeline แบบเร็ว:
 
 ```bash
 python train.py --generate-sample --data-dir data
 ```
 
-## 5) ใช้โมเดลแยกคลาสจากวิดีโอยาว
+## 4) Auto Label วิดีโอยาวด้วยโมเดลที่เทรนแล้ว
+
+สามารถใช้ `infer_video.py` แยกช่วงคลาสจากวิดีโอยาวได้ (pseudo-label):
 
 ```bash
-python infer_video.py \
-  --video path/to/long_video.mp4 \
-  --model models/lstm_fall_model.h5 \
-  --out-csv segments.csv \
-  --timesteps 30 --step 1 --batch-size 64 \
-  --labels Fall,No_Fall,Pre-Fall,Falling \
+python infer_video.py ^
+  --video path\to\long_video.mp4 ^
+  --model models/lstm_fall_model.h5 ^
+  --out-csv segments.csv ^
+  --timesteps 30 --step 1 --batch-size 64 ^
+  --labels Fall,No_Fall,Pre-Fall,Falling ^
   --out-video labeled.mp4
 ```
 
 ผลลัพธ์:
-- `segments.csv` มีคอลัมน์ `class_id,class_name,start_time_s,end_time_s,avg_score`
-- `labeled.mp4` (ถ้าระบุ `--out-video`)
+- `segments.csv`: `class_id,class_name,start_time_s,end_time_s,avg_score`
+- `labeled.mp4`: วิดีโอที่วาด label บนภาพ (ถ้าใส่ `--out-video`)
 
-## 6) รันแบบ real-time จากกล้อง (`main.py`)
+คำแนะนำ:
+- ใช้ผล auto-label เป็น “ร่างแรก” แล้วตรวจแก้ด้วยคนก่อนนำไปเทรนรอบถัดไป
+- ลำดับชื่อใน `--labels` ต้องตรงกับ class id ของโมเดล
 
-`main.py` โหลดโมเดลที่เทรนแล้วผ่าน `--model` และรองรับกล้องหลายแบบผ่าน `--camera`
+## 5) รันแบบ Real-time (`main.py`)
 
-### Iriun Webcam
+`main.py` รองรับหลายโหมดกล้องผ่าน `--camera`
+
+### Iriun
 
 ```bash
 python main.py --camera iriun --model models/lstm_fall_model.h5
@@ -104,24 +125,20 @@ python main.py --camera iriun --model models/lstm_fall_model.h5
 python main.py --camera pi --model models/lstm_fall_model.h5
 ```
 
-### RTSP stream (เช่นสตรีมจาก Pi)
+### RTSP stream
 
 ```bash
 python main.py --camera rtsp --source rtsp://<pi-ip>:8554/stream --model models/lstm_fall_model.h5
 ```
 
-### กล้องจาก camera index
+### กล้องตาม index
 
 ```bash
 python main.py --camera index --source 0 --model models/lstm_fall_model.h5
 ```
 
-## 7) หมายเหตุสำคัญ
+## หมายเหตุสำคัญ
 
-- ถ้าวิดีโอยังไม่ติดป้ายคลาส ห้ามเทรนตรงๆ ให้แยกคลาสก่อน
-- ให้ใช้ `timesteps` เดียวกันในขั้นตอน train และ inference
-- ชื่อคลาสใน `--labels` ควรเรียงให้ตรงกับ class id ของโมเดล
-- ต้องมีไฟล์ต่อไปนี้ในโฟลเดอร์ `models/`:
-  - `pose_landmarker_lite.task`
-  - `hand_landmarker.task`
-  - `lstm_fall_model.h5` (หลังเทรน)
+- ห้ามเทรนจากวิดีโอยาวที่ยังไม่ติดป้ายโดยตรง
+- ให้ใช้ `timesteps` เดียวกันระหว่างแปลงข้อมูล, เทรน, และ inference
+- ก่อนรัน inference ต้องมี `models/lstm_fall_model.h5`
