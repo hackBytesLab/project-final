@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+
+# Generated datasets / artifacts
+data/
+data_long/
+data_videos/
+work_csv/
+refs/*.mp4
+refs/*.avi
+refs/*.mov
+refs/*.mkv
+
+# Trained models
+models/*.h5
+models/*.keras
