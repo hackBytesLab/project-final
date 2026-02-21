@@ -43,7 +43,7 @@ def main():
     if X.ndim != 3:
         raise ValueError('X must be 3D: (n_samples, timesteps, num_features)')
 
-    n_samples, timesteps, num_features = X.shape
+    _, _, num_features = X.shape
     classes = len(np.unique(y))
 
     # Ensure labels are integer class ids 0..C-1

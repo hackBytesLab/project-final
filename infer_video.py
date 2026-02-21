@@ -8,21 +8,24 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from tensorflow.keras.models import load_model
 
-# Mediapipe detectors (same as main.py / video_to_dataset.py)
-pose_model_path = 'models/pose_landmarker_lite.task'
-hand_model_path = 'models/hand_landmarker.task'
-
-pose_base = python.BaseOptions(model_asset_path=pose_model_path)
-pose_options = vision.PoseLandmarkerOptions(base_options=pose_base,
-                                            output_segmentation_masks=False)
-pose_detector = vision.PoseLandmarker.create_from_options(pose_options)
-
-hand_base = python.BaseOptions(model_asset_path=hand_model_path)
-hand_options = vision.HandLandmarkerOptions(base_options=hand_base, num_hands=2)
-hand_detector = vision.HandLandmarker.create_from_options(hand_options)
+POSE_MODEL_PATH = 'models/pose_landmarker_lite.task'
+HAND_MODEL_PATH = 'models/hand_landmarker.task'
 
 
-def extract_frame_features(frame):
+def create_detectors():
+    pose_base = python.BaseOptions(model_asset_path=POSE_MODEL_PATH)
+    pose_options = vision.PoseLandmarkerOptions(
+        base_options=pose_base, output_segmentation_masks=False
+    )
+    pose_detector = vision.PoseLandmarker.create_from_options(pose_options)
+
+    hand_base = python.BaseOptions(model_asset_path=HAND_MODEL_PATH)
+    hand_options = vision.HandLandmarkerOptions(base_options=hand_base, num_hands=2)
+    hand_detector = vision.HandLandmarker.create_from_options(hand_options)
+    return pose_detector, hand_detector
+
+
+def extract_frame_features(frame, pose_detector, hand_detector):
     h, w, _ = frame.shape
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
 
@@ -56,6 +59,7 @@ def infer_on_video(video_path, model_path, out_csv, timesteps=30, step=1, batch_
         raise FileNotFoundError('Model file not found: ' + model_path)
 
     model = load_model(model_path)
+    pose_detector, hand_detector = create_detectors()
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -75,7 +79,7 @@ def infer_on_video(video_path, model_path, out_csv, timesteps=30, step=1, batch_
             break
         frames.append(frame)
         try:
-            feats = extract_frame_features(frame)
+            feats = extract_frame_features(frame, pose_detector, hand_detector)
         except Exception:
             feats = [0.0] * 150
         features.append(feats)

@@ -6,21 +6,24 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-# Uses the same feature extraction logic as main.py
-pose_model_path = 'models/pose_landmarker_lite.task'
-hand_model_path = 'models/hand_landmarker.task'
-
-pose_base = python.BaseOptions(model_asset_path=pose_model_path)
-pose_options = vision.PoseLandmarkerOptions(base_options=pose_base,
-                                            output_segmentation_masks=False)
-pose_detector = vision.PoseLandmarker.create_from_options(pose_options)
-
-hand_base = python.BaseOptions(model_asset_path=hand_model_path)
-hand_options = vision.HandLandmarkerOptions(base_options=hand_base, num_hands=2)
-hand_detector = vision.HandLandmarker.create_from_options(hand_options)
+POSE_MODEL_PATH = 'models/pose_landmarker_lite.task'
+HAND_MODEL_PATH = 'models/hand_landmarker.task'
 
 
-def extract_frame_features(frame):
+def create_detectors():
+    pose_base = python.BaseOptions(model_asset_path=POSE_MODEL_PATH)
+    pose_options = vision.PoseLandmarkerOptions(
+        base_options=pose_base, output_segmentation_masks=False
+    )
+    pose_detector = vision.PoseLandmarker.create_from_options(pose_options)
+
+    hand_base = python.BaseOptions(model_asset_path=HAND_MODEL_PATH)
+    hand_options = vision.HandLandmarkerOptions(base_options=hand_base, num_hands=2)
+    hand_detector = vision.HandLandmarker.create_from_options(hand_options)
+    return pose_detector, hand_detector
+
+
+def extract_frame_features(frame, pose_detector, hand_detector):
     h, w, _ = frame.shape
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
 
@@ -50,6 +53,7 @@ def extract_frame_features(frame):
 
 
 def process_videos(input_dir, output_dir, timesteps=30, step=15):
+    pose_detector, hand_detector = create_detectors()
     classes = sorted([d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))])
     if not classes:
         raise ValueError('No class subfolders found in input directory')
@@ -72,7 +76,7 @@ def process_videos(input_dir, output_dir, timesteps=30, step=15):
                 if not success:
                     break
                 try:
-                    feats = extract_frame_features(frame)
+                    feats = extract_frame_features(frame, pose_detector, hand_detector)
                 except Exception as e:
                     print('Warning: detection failed on frame:', e)
                     feats = [0.0] * 150
@@ -110,7 +114,7 @@ def main():
     parser.add_argument('--input', required=True, help='Input folder with subfolders per class (videos)')
     parser.add_argument('--output', default='data', help='Output folder to save X.npy and y.npy')
     parser.add_argument('--timesteps', type=int, default=30)
-    parser.add_argument('--step', type=int, default=15, help='Sliding window step (default 50% overlap)')
+    parser.add_argument('--step', type=int, default=15, help='Sliding window step (default 50%% overlap)')
 
     args = parser.parse_args()
     process_videos(args.input, args.output, timesteps=args.timesteps, step=args.step)
