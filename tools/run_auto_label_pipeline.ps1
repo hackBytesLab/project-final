@@ -51,7 +51,8 @@ python video_to_dataset.py `
   --input data_videos `
   --output data `
   --timesteps $Timesteps `
-  --step 15
+  --step 15 `
+  --labels $Labels
 
 if ($RunTrain) {
     Write-Host "[6/6] Train new model..."

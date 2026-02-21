@@ -42,7 +42,7 @@ Dependencies หลัก:
 - `models/hand_landmarker.task`
 - `models/lstm_fall_model.h5` (โมเดลเดิมสำหรับ auto-label)
 
-## 4) ค่า default ใน `.evnv`
+## 4) ค่า default ใน `.env` / `.evnv`
 
 ตอนนี้ตั้งค่าเริ่มต้นไว้เป็น Pi Camera:
 - `CAMERA_MODE=pi`
@@ -54,7 +54,9 @@ Dependencies หลัก:
 - `LINE_CHANNEL_ACCESS_TOKEN=`
 - `LINE_USER_ID=`
 
-หมายเหตุ: สคริปต์ยังไม่โหลด `.evnv` อัตโนมัติ (ใช้เป็นค่าอ้างอิงตอนใส่ CLI args)
+หมายเหตุ:
+- `main.py` จะโหลดค่าจาก `.env` หรือ `.evnv` อัตโนมัติ (ถ้ามี)
+- CLI arguments จะ override ค่าจากไฟล์เสมอ
 
 ## 5) Step-by-step ตั้งแต่เริ่มต้น
 
@@ -124,12 +126,13 @@ python tools/segments_to_clips.py --video data_long/long_train.mp4 --segments-cs
 ### Step 6: สร้าง dataset
 
 ```bash
-python video_to_dataset.py --input data_videos --output data --timesteps 30 --step 15
+python video_to_dataset.py --input data_videos --output data --timesteps 30 --step 15 --labels Fall,No_Fall,Pre-Fall,Falling
 ```
 
 ผลลัพธ์:
 - `data/X.npy`
 - `data/y.npy`
+- `data/class_map.json`
 
 ### Step 7: เทรนโมเดลรอบใหม่
 
@@ -140,7 +143,7 @@ python train.py --data-dir data --epochs 30 --batch-size 32 --out models/lstm_fa
 ### Step 8: Deploy และรัน real-time (Pi Camera)
 
 ```bash
-python main.py --camera pi --model models/lstm_fall_model_v2.h5
+python main.py --camera pi --model models/lstm_fall_model_v2.h5 --labels Fall,No_Fall,Pre-Fall,Falling
 ```
 
 ## 6) LINE Alert (เมื่อพบการล้ม)
@@ -148,7 +151,7 @@ python main.py --camera pi --model models/lstm_fall_model_v2.h5
 ตัวอย่างส่งแจ้งเตือนเมื่อเจอ `Fall`:
 
 ```bash
-python main.py --camera pi --model models/lstm_fall_model_v2.h5 --line-token "<LINE_CHANNEL_ACCESS_TOKEN>" --line-user-id "<USER_OR_GROUP_ID>" --alert-classes Fall --line-cooldown-seconds 60
+python main.py --camera pi --model models/lstm_fall_model_v2.h5 --labels Fall,No_Fall,Pre-Fall,Falling --line-token "<LINE_CHANNEL_ACCESS_TOKEN>" --line-user-id "<USER_OR_GROUP_ID>" --alert-classes Fall --line-cooldown-seconds 60
 ```
 
 ตัวเลือกสำคัญ:
@@ -170,6 +173,7 @@ powershell -ExecutionPolicy Bypass -File tools/run_auto_label_pipeline.ps1 -Vide
 - หลัง filter ยังมีคลาสสำคัญที่ต้องการ
 - `data_videos/<class>/` มีไฟล์จริง
 - `data/X.npy` เป็น 3 มิติ และ `X.shape[2] == 150`
+- ตรวจ `data/class_map.json` ว่า order ตรงกับ `--labels`
 - เทรนแล้วได้ `models/lstm_fall_model_v2.h5`
 - รัน `main.py` แล้วพยากรณ์ได้ต่อเนื่อง
 
@@ -177,5 +181,6 @@ powershell -ExecutionPolicy Bypass -File tools/run_auto_label_pipeline.ps1 -Vide
 
 - Auto-label คือ pseudo-label ควรตรวจแก้ก่อน retrain
 - `timesteps` ต้องสอดคล้องกันใน infer/dataset/train
+- ให้ใช้ label เดียวกันตลอด pipeline (infer/dataset/main): `Fall,No_Fall,Pre-Fall,Falling`
 - ถ้า class order ไม่ชัด ให้รัน `tools/verify_class_order.py` ก่อนทุกครั้ง
 - อย่า hardcode token ในโค้ด ให้ส่งผ่าน argument หรือ environment variable

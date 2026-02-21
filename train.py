@@ -44,11 +44,15 @@ def main():
         raise ValueError('X must be 3D: (n_samples, timesteps, num_features)')
 
     _, _, num_features = X.shape
-    classes = len(np.unique(y))
 
     # Ensure labels are integer class ids 0..C-1
     if y.ndim > 1:
         y = y.flatten()
+    if y.size == 0:
+        raise ValueError('y is empty')
+    if np.min(y) < 0:
+        raise ValueError('y must contain non-negative class ids')
+    classes = int(np.max(y)) + 1
 
     y_cat = to_categorical(y, num_classes=classes)
 
