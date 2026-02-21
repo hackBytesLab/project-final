@@ -2,15 +2,16 @@ import cv2
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from tensorflow.keras.models import load_model
 from Iriun_Webcam import get_iriun_camera
 
-from lstm_model import build_lstm_model, predict_sequence
+from lstm_model import predict_sequence
 import numpy as np
 
 # ===== กำหนดจำนวน feature และ class =====
 num_features = 150   # 75 จุด (pose+hand) × 2 (x,y)
 num_classes = 4      # Fall / No Fall / Pre-Fall / Falling
-model = build_lstm_model(num_features, num_classes)
+model = load_model('models/lstm_fall_model.h5')
 
 sequence_buffer = []
 
@@ -145,3 +146,4 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
+
