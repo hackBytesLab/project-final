@@ -1,4 +1,9 @@
 import argparse
+import json
+import os
+import time
+import urllib.error
+import urllib.request
 
 import cv2
 import mediapipe as mp
@@ -7,12 +12,58 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from tensorflow.keras.models import load_model
 
-from Iriun_Webcam import get_iriun_camera
 from lstm_model import predict_sequence
+
+try:
+    from Iriun_Webcam import get_iriun_camera
+except ImportError:
+    get_iriun_camera = None
+
+
+def send_line_alert(channel_access_token, message, to_user_id=None, timeout=10):
+    if not channel_access_token:
+        raise ValueError("LINE channel access token is required")
+
+    if to_user_id:
+        endpoint = "https://api.line.me/v2/bot/message/push"
+        payload = {
+            "to": to_user_id,
+            "messages": [{"type": "text", "text": message}],
+        }
+    else:
+        endpoint = "https://api.line.me/v2/bot/message/broadcast"
+        payload = {"messages": [{"type": "text", "text": message}]}
+
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {channel_access_token}",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read().decode("utf-8", errors="ignore")
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"LINE API error {e.code}: {err_body}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"LINE API connection error: {e}") from e
 
 
 def open_camera(camera_mode, source):
     if camera_mode == "iriun":
+        if get_iriun_camera is None:
+            cap = cv2.VideoCapture(1)
+            if not cap.isOpened():
+                raise RuntimeError(
+                    "Iriun mode selected but Iriun_Webcam.py is missing and camera index 1 cannot be opened."
+                )
+            return cap
         return get_iriun_camera()
 
     if camera_mode == "pi":
@@ -58,6 +109,27 @@ def main():
         "--model",
         default="models/lstm_fall_model.h5",
         help="Path to trained model (.h5/.keras)",
+    )
+    parser.add_argument(
+        "--line-token",
+        default=os.getenv("LINE_CHANNEL_ACCESS_TOKEN"),
+        help="LINE Messaging API channel access token. If omitted, no LINE alert is sent.",
+    )
+    parser.add_argument(
+        "--line-user-id",
+        default=os.getenv("LINE_USER_ID"),
+        help="Target LINE user/group/room ID for push API. If omitted, broadcast API is used.",
+    )
+    parser.add_argument(
+        "--line-cooldown-seconds",
+        type=int,
+        default=60,
+        help="Minimum seconds between LINE alerts.",
+    )
+    parser.add_argument(
+        "--alert-classes",
+        default="Fall",
+        help="Comma-separated class names that should trigger LINE alerts.",
     )
     args = parser.parse_args()
 
@@ -130,9 +202,18 @@ def main():
 
     line_color = (0, 255, 0)
     point_color = (0, 255, 0)
+    alert_classes = {x.strip() for x in args.alert_classes.split(",") if x.strip()}
+    last_alert_time = 0.0
 
     cap = open_camera(args.camera, args.source)
     print(f"Using camera mode: {args.camera}, source: {args.source}")
+    if args.line_token:
+        if args.line_user_id:
+            print("[LINE] Alert enabled via push API")
+        else:
+            print("[LINE] Alert enabled via broadcast API")
+    else:
+        print("[LINE] Alert disabled (missing token)")
 
     while True:
         ret, frame = cap.read()
@@ -192,6 +273,24 @@ def main():
                 gesture_id = predict_sequence(model, seq)
                 gesture_name = gesture_labels.get(gesture_id, str(gesture_id))
                 print("Condition:", gesture_name)
+
+                if args.line_token and gesture_name in alert_classes:
+                    now = time.time()
+                    if now - last_alert_time >= args.line_cooldown_seconds:
+                        alert_message = (
+                            f"ALERT: Detected {gesture_name} at {time.strftime('%Y-%m-%d %H:%M:%S')}"
+                        )
+                        try:
+                            send_line_alert(
+                                channel_access_token=args.line_token,
+                                message=alert_message,
+                                to_user_id=args.line_user_id,
+                            )
+                            last_alert_time = now
+                            print("[LINE] Alert sent")
+                        except Exception as e:
+                            print(f"[LINE] Alert failed: {e}")
+
                 cv2.putText(
                     frame,
                     f"Condition: {gesture_name}",

@@ -1,7 +1,11 @@
 # Runtime / model defaults
 MODEL_PATH=models/lstm_fall_model.h5
-CAMERA_MODE=iriun
+CAMERA_MODE=pi
 CAMERA_SOURCE=
+LINE_CHANNEL_ACCESS_TOKEN=
+LINE_USER_ID=
+LINE_COOLDOWN_SECONDS=60
+ALERT_CLASSES=Fall
 
 # Sequence / dataset defaults
 TIMESTEPS=30
