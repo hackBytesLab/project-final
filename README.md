@@ -35,6 +35,7 @@ Dependencies หลัก:
 - `tools/filter_segments.py`: filter segments ตาม `avg_score`
 - `tools/segments_to_clips.py`: ตัดคลิปลงโฟลเดอร์คลาสด้วย ffmpeg
 - `tools/run_auto_label_pipeline.ps1`: one-shot pipeline (Windows)
+- `tools/test_line_alert.py`: send LINE test message (broadcast/push) without camera/model
 
 ## 3) ไฟล์โมเดลที่ต้องมีใน `models/`
 
@@ -43,6 +44,14 @@ Dependencies หลัก:
 - `models/lstm_fall_model.h5` (โมเดลเดิมสำหรับ auto-label)
 
 ## 4) ค่า default ใน `.env` / `.evnv`
+
+Security note:
+- Keep real tokens only in local `.env` or `.evnv` files.
+- Use `.evnv.example` as template, then create your local file:
+
+```powershell
+Copy-Item .evnv.example .evnv
+```
 
 ตอนนี้ตั้งค่าเริ่มต้นไว้เป็น Pi Camera:
 - `CAMERA_MODE=pi`
@@ -151,7 +160,7 @@ python main.py --camera pi --model models/lstm_fall_model_v2.h5 --labels Fall,No
 ตัวอย่างส่งแจ้งเตือนเมื่อเจอ `Fall`:
 
 ```bash
-python main.py --camera pi --model models/lstm_fall_model_v2.h5 --labels Fall,No_Fall,Pre-Fall,Falling --line-token "<LINE_CHANNEL_ACCESS_TOKEN>" --line-user-id "<USER_OR_GROUP_ID>" --alert-classes Fall --line-cooldown-seconds 60
+python main.py --camera pi --model models/lstm_fall_model_v2.h5 --labels Fall,No_Fall,Pre-Fall,Falling --line-token "<LINE_CHANNEL_ACCESS_TOKEN>" --alert-classes Fall --line-cooldown-seconds 60
 ```
 
 ตัวเลือกสำคัญ:
@@ -160,6 +169,18 @@ python main.py --camera pi --model models/lstm_fall_model_v2.h5 --labels Fall,No
 - ถ้าไม่ใส่ `--line-user-id` จะใช้ Broadcast API
 - `--alert-classes`: คลาสที่ให้ส่งแจ้งเตือน (คั่นด้วย comma ได้)
 - `--line-cooldown-seconds`: กันแจ้งเตือนถี่เกินไป
+
+Quick test before running camera/model:
+
+```bash
+python tools/test_line_alert.py --mode broadcast --token "<LINE_CHANNEL_ACCESS_TOKEN>" --message "[LINE TEST] Broadcast OK"
+```
+
+Push test (optional):
+
+```bash
+python tools/test_line_alert.py --mode push --token "<LINE_CHANNEL_ACCESS_TOKEN>" --user-id "<USER_OR_GROUP_ID>" --message "[LINE TEST] Push OK"
+```
 
 ## 7) One-shot Pipeline (Windows)
 
@@ -189,3 +210,4 @@ powershell -ExecutionPolicy Bypass -File tools/run_auto_label_pipeline.ps1 -Vide
 - ให้ใช้ label เดียวกันตลอด pipeline (infer/dataset/main): `Fall,No_Fall,Pre-Fall,Falling`
 - ถ้า class order ไม่ชัด ให้รัน `tools/verify_class_order.py` ก่อนทุกครั้ง
 - อย่า hardcode token ในโค้ด ให้ส่งผ่าน argument หรือ environment variable
+- หาก token เคยถูกแชร์ในแชท/commit ให้ rotate (ออก token ใหม่และ revoke ตัวเดิม) ทันที
