@@ -43,7 +43,7 @@ Dependencies หลัก:
 - `models/hand_landmarker.task`
 - `models/lstm_fall_model.h5` (โมเดลเดิมสำหรับ auto-label)
 
-## 4) ค่า default ใน `.env` / `.evnv`
+## 4) ค่า default ใน `.env` (รองรับ `.evnv` ด้วย)
 
 Security note:
 - Keep real tokens only in local `.env` or `.evnv` files.
@@ -64,7 +64,7 @@ Copy-Item .evnv.example .evnv
 - `LINE_USER_ID=`
 
 หมายเหตุ:
-- `main.py` จะโหลดค่าจาก `.env` หรือ `.evnv` อัตโนมัติ (ถ้ามี)
+- `main.py` จะโหลดค่าจาก `.env` ก่อน และ fallback ไป `.evnv` (ถ้ามี)
 - CLI arguments จะ override ค่าจากไฟล์เสมอ
 
 ## 5) Step-by-step ตั้งแต่เริ่มต้น
