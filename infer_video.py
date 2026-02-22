@@ -8,58 +8,75 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from tensorflow.keras.models import load_model
 
+from feature_layout import build_frame_features_with_options, resolve_feature_layout
+
 POSE_MODEL_PATH = 'models/pose_landmarker_lite.task'
 HAND_MODEL_PATH = 'models/hand_landmarker.task'
 
 
-def create_detectors():
+def create_detectors(max_people=1, max_hands=2):
     pose_base = python.BaseOptions(model_asset_path=POSE_MODEL_PATH)
     pose_options = vision.PoseLandmarkerOptions(
-        base_options=pose_base, output_segmentation_masks=False
+        base_options=pose_base, output_segmentation_masks=False, num_poses=max_people
     )
     pose_detector = vision.PoseLandmarker.create_from_options(pose_options)
 
     hand_base = python.BaseOptions(model_asset_path=HAND_MODEL_PATH)
-    hand_options = vision.HandLandmarkerOptions(base_options=hand_base, num_hands=2)
+    hand_options = vision.HandLandmarkerOptions(base_options=hand_base, num_hands=max_hands)
     hand_detector = vision.HandLandmarker.create_from_options(hand_options)
     return pose_detector, hand_detector
 
 
-def extract_frame_features(frame, pose_detector, hand_detector):
-    h, w, _ = frame.shape
+def extract_frame_features(
+    frame,
+    pose_detector,
+    hand_detector,
+    max_people,
+    max_hands,
+    normalize_geometry=False,
+):
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
 
     pose_result = pose_detector.detect(mp_image)
     hand_result = hand_detector.detect(mp_image)
-
-    features = []
-
-    # Pose (33 points x,y)
-    if pose_result.pose_landmarks:
-        for lm in pose_result.pose_landmarks[0]:
-            features.extend([lm.x, lm.y])
-    else:
-        features.extend([0.0] * (33 * 2))
-
-    # Hands (2 hands x 21 points x,y)
-    if hand_result.hand_landmarks:
-        for hand in hand_result.hand_landmarks:
-            for lm in hand:
-                features.extend([lm.x, lm.y])
-        if len(hand_result.hand_landmarks) == 1:
-            features.extend([0.0] * (21 * 2))
-    else:
-        features.extend([0.0] * (21 * 2 * 2))
-
-    return features
+    return build_frame_features_with_options(
+        pose_result.pose_landmarks,
+        hand_result.hand_landmarks,
+        max_people=max_people,
+        max_hands=max_hands,
+        normalize_geometry=normalize_geometry,
+    )
 
 
-def infer_on_video(video_path, model_path, out_csv, timesteps=30, step=1, batch_size=64, labels_map=None, out_video=None):
+def infer_on_video(
+    video_path,
+    model_path,
+    out_csv,
+    timesteps=30,
+    step=1,
+    batch_size=64,
+    labels_map=None,
+    out_video=None,
+    max_people_arg=0,
+    max_hands_arg=0,
+    normalize_geometry=False,
+):
     if not os.path.exists(model_path):
         raise FileNotFoundError('Model file not found: ' + model_path)
 
     model = load_model(model_path)
-    pose_detector, hand_detector = create_detectors()
+    model_input_shape = model.input_shape
+    if isinstance(model_input_shape, list):
+        model_input_shape = model_input_shape[0]
+    if not model_input_shape or model_input_shape[-1] is None:
+        raise ValueError(f"Unsupported model input shape: {model_input_shape}")
+    num_features = int(model_input_shape[-1])
+    max_people, max_hands = resolve_feature_layout(
+        num_features=num_features,
+        max_people_arg=max_people_arg,
+        max_hands_arg=max_hands_arg,
+    )
+    pose_detector, hand_detector = create_detectors(max_people=max_people, max_hands=max_hands)
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -79,9 +96,16 @@ def infer_on_video(video_path, model_path, out_csv, timesteps=30, step=1, batch_
             break
         frames.append(frame)
         try:
-            feats = extract_frame_features(frame, pose_detector, hand_detector)
+            feats = extract_frame_features(
+                frame,
+                pose_detector,
+                hand_detector,
+                max_people=max_people,
+                max_hands=max_hands,
+                normalize_geometry=normalize_geometry,
+            )
         except Exception:
-            feats = [0.0] * 150
+            feats = [0.0] * num_features
         features.append(feats)
 
     n_frames = len(features)
@@ -183,6 +207,23 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--labels', help='Optional comma-separated class names in order (e.g. Fall,No_Fall,Pre-Fall,Falling)')
     parser.add_argument('--out-video', help='Optional path to save visualization video')
+    parser.add_argument(
+        '--max-people',
+        type=int,
+        default=0,
+        help='People slots used for feature extraction (0=auto from model input shape)',
+    )
+    parser.add_argument(
+        '--max-hands',
+        type=int,
+        default=0,
+        help='Hand slots used for feature extraction (0=2*max-people)',
+    )
+    parser.add_argument(
+        '--normalize-geometry',
+        action='store_true',
+        help='Normalize pose/hand geometry per entity (use same setting as training).',
+    )
 
     args = parser.parse_args()
 
@@ -191,4 +232,16 @@ if __name__ == '__main__':
         parts = [p.strip() for p in args.labels.split(',')]
         label_map = {i: parts[i] for i in range(len(parts))}
 
-    infer_on_video(args.video, args.model, args.out_csv, timesteps=args.timesteps, step=args.step, batch_size=args.batch_size, labels_map=label_map, out_video=args.out_video)
+    infer_on_video(
+        args.video,
+        args.model,
+        args.out_csv,
+        timesteps=args.timesteps,
+        step=args.step,
+        batch_size=args.batch_size,
+        labels_map=label_map,
+        out_video=args.out_video,
+        max_people_arg=args.max_people,
+        max_hands_arg=args.max_hands,
+        normalize_geometry=args.normalize_geometry,
+    )

@@ -70,6 +70,23 @@ def main():
         help="Sliding window step for video_to_dataset.py",
     )
     parser.add_argument(
+        "--max-people",
+        type=int,
+        default=1,
+        help="People slots used in dataset feature extraction.",
+    )
+    parser.add_argument(
+        "--max-hands",
+        type=int,
+        default=0,
+        help="Hand slots used in dataset feature extraction (0=2*max-people).",
+    )
+    parser.add_argument(
+        "--normalize-geometry",
+        action="store_true",
+        help="Normalize pose/hand geometry in infer and dataset feature extraction.",
+    )
+    parser.add_argument(
         "--save-preview",
         action="store_true",
         help="Save labeled preview videos from infer_video.py",
@@ -131,6 +148,8 @@ def main():
             infer_cmd.extend(
                 ["--out-video", str(work_csv_dir / f"labeled_preview_{video_id}.mp4")]
             )
+        if args.normalize_geometry:
+            infer_cmd.append("--normalize-geometry")
         run_cmd(infer_cmd)
 
         run_cmd(
@@ -170,22 +189,27 @@ def main():
             cut_cmd.append("--copy-codec")
         run_cmd(cut_cmd)
 
-    run_cmd(
-        [
-            py,
-            "video_to_dataset.py",
-            "--input",
-            str(clips_dir),
-            "--output",
-            str(dataset_dir),
-            "--timesteps",
-            str(args.timesteps),
-            "--step",
-            str(args.dataset_step),
-            "--labels",
-            args.labels,
-        ]
-    )
+    dataset_cmd = [
+        py,
+        "video_to_dataset.py",
+        "--input",
+        str(clips_dir),
+        "--output",
+        str(dataset_dir),
+        "--timesteps",
+        str(args.timesteps),
+        "--step",
+        str(args.dataset_step),
+        "--labels",
+        args.labels,
+        "--max-people",
+        str(args.max_people),
+        "--max-hands",
+        str(args.max_hands),
+    ]
+    if args.normalize_geometry:
+        dataset_cmd.append("--normalize-geometry")
+    run_cmd(dataset_cmd)
 
     print("[OK] Dataset build complete.")
     print("[OK] Dataset dir:", dataset_dir)

@@ -212,3 +212,85 @@ powershell -ExecutionPolicy Bypass -File tools/run_auto_label_pipeline.ps1 -Vide
 - `timesteps` ต้องสอดคล้องกันใน `infer_video.py`, `video_to_dataset.py`, `train.py`
 - Auto-label เป็น pseudo-label ควรตรวจและแก้ก่อน retrain
 - อย่า hardcode token ในโค้ด ให้ส่งผ่าน env หรือ CLI เท่านั้น
+
+## 10) Multi-person + Geometry Update (2026-02-22)
+
+This update adds runtime support for both single-person and multi-person workflows.
+
+### 10.1 Runtime Modes in `main.py`
+
+`--inference-mode` has 3 options:
+- `auto`: uses `per-person` automatically when model input is 150 features and `--detect-people > 1`; otherwise uses `frame`
+- `frame`: one prediction for the whole frame sequence
+- `per-person`: one prediction per tracked person (P1..P4)
+
+Examples:
+
+```bash
+# Single-person runtime (stable baseline)
+python main.py --model models/lstm_fall_model.h5 --detect-people 1 --inference-mode frame
+```
+
+```bash
+# Multi-person runtime with single-person (150-feature) model
+python main.py --model models/lstm_fall_model.h5 --detect-people 4 --inference-mode per-person
+```
+
+```bash
+# Auto mode (recommended default)
+python main.py --model models/lstm_fall_model.h5 --detect-people 4 --inference-mode auto
+```
+
+### 10.2 Person Tracking Controls (`main.py`)
+
+In `per-person` mode, track association is center-distance based.
+
+- `--track-max-distance` (default `0.20`): max normalized center distance for matching detections to tracks
+- `--track-max-missed` (default `15`): how many missed frames before resetting a track
+
+Example:
+
+```bash
+python main.py --model models/lstm_fall_model.h5 --detect-people 4 --inference-mode per-person --track-max-distance 0.20 --track-max-missed 15
+```
+
+### 10.3 Geometry Normalization
+
+`--normalize-geometry` is available in:
+- `main.py`
+- `infer_video.py`
+- `video_to_dataset.py`
+- `tools/build_dataset_from_long_videos.py`
+
+Important:
+- Use the same normalization setting in dataset generation, training, and inference.
+- If you train without normalization, do not enable it at runtime for that model.
+
+Example dataset/training/runtime with normalization:
+
+```bash
+python video_to_dataset.py --input data_videos --output data --timesteps 30 --step 15 --labels Fall,No_Fall,Pre-Fall,Falling --max-people 1 --max-hands 2 --normalize-geometry
+python train.py --data-dir data --validation-mode holdout-kfold --num-folds 5 --test-size 0.2 --split-unit clip --meta-csv data/sample_meta.csv --epochs 30 --batch-size 32 --out models/lstm_fall_model_norm.h5 --reports-dir work_csv/eval --labels Fall,No_Fall,Pre-Fall,Falling
+python main.py --model models/lstm_fall_model_norm.h5 --detect-people 4 --inference-mode per-person --normalize-geometry
+```
+
+### 10.4 Pipeline Updates
+
+`tools/build_dataset_from_long_videos.py` now supports:
+- `--max-people`
+- `--max-hands`
+- `--normalize-geometry`
+
+Example:
+
+```bash
+python tools/build_dataset_from_long_videos.py --videos Data/train.mp4,Data/train2.mp4 --model models/lstm_fall_model.h5 --labels Fall,No_Fall,Pre-Fall,Falling --backend auto --max-people 1 --max-hands 2 --normalize-geometry
+```
+
+### 10.5 `.evnv.example` New Keys
+
+New env keys:
+- `INFERENCE_MODE=auto`
+- `NORMALIZE_GEOMETRY=0`
+- `TRACK_MAX_DISTANCE=0.20`
+- `TRACK_MAX_MISSED=15`
