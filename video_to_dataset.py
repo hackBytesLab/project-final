@@ -1,6 +1,7 @@
 import os
 import argparse
 import json
+import csv
 import numpy as np
 import cv2
 import mediapipe as mp
@@ -61,23 +62,35 @@ def parse_labels(raw_labels):
     return labels
 
 
+def infer_source_video_id(filename):
+    stem = os.path.splitext(filename)[0]
+    marker = "__seg_"
+    if marker in stem:
+        return stem.split(marker)[0]
+    return stem
+
+
 def process_videos(input_dir, output_dir, timesteps=30, step=15, labels=None):
     pose_detector, hand_detector = create_detectors()
-    classes = labels if labels else sorted([d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))])
+    classes = labels if labels else sorted(
+        [d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))]
+    )
     if not classes:
         raise ValueError('No class subfolders found in input directory')
 
     X = []
     y = []
+    sample_meta = []
     class_map = {cls: idx for idx, cls in enumerate(classes)}
     sample_counts = {cls: 0 for cls in classes}
+    sample_idx = 0
 
     for cls in classes:
         cls_dir = os.path.join(input_dir, cls)
         if not os.path.isdir(cls_dir):
             print(f"Warning: class folder not found, skipped: {cls_dir}")
             continue
-        for fname in os.listdir(cls_dir):
+        for fname in sorted(os.listdir(cls_dir)):
             if not fname.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
                 continue
             path = os.path.join(cls_dir, fname)
@@ -107,22 +120,58 @@ def process_videos(input_dir, output_dir, timesteps=30, step=15, labels=None):
                 X.append(seq)
                 y.append(class_map[cls])
                 sample_counts[cls] += 1
+                clip_rel = os.path.relpath(path, input_dir).replace("\\", "/")
+                source_video = infer_source_video_id(fname)
+                sample_meta.append(
+                    {
+                        "sample_idx": sample_idx,
+                        "class_id": class_map[cls],
+                        "class_name": cls,
+                        "clip_path": clip_rel,
+                        "source_video": source_video,
+                        "window_start": i,
+                        "window_end": i + timesteps - 1,
+                        "group_id": clip_rel,
+                    }
+                )
+                sample_idx += 1
 
             print(f"Processed {path}: frames={n_frames}, samples={(n_frames - timesteps + 1 + (step-1))//step}")
 
-    X = np.array(X, dtype=np.float32)
-    y = np.array(y, dtype=np.int32)
+    if X:
+        X = np.array(X, dtype=np.float32)
+    else:
+        X = np.empty((0, timesteps, 150), dtype=np.float32)
+    y = np.array(y, dtype=np.int32) if y else np.empty((0,), dtype=np.int32)
 
     os.makedirs(output_dir, exist_ok=True)
     np.save(os.path.join(output_dir, 'X.npy'), X)
     np.save(os.path.join(output_dir, 'y.npy'), y)
     with open(os.path.join(output_dir, 'class_map.json'), 'w', encoding='utf-8') as f:
         json.dump(class_map, f, ensure_ascii=False, indent=2)
+    meta_path = os.path.join(output_dir, 'sample_meta.csv')
+    with open(meta_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "sample_idx",
+                "class_id",
+                "class_name",
+                "clip_path",
+                "source_video",
+                "window_start",
+                "window_end",
+                "group_id",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(sample_meta)
 
     print('Saved dataset ->', output_dir)
     print('Classes:', class_map)
     print('X shape:', X.shape)
     print('y shape:', y.shape)
+    print('sample_meta:', meta_path)
     for cls, count in sample_counts.items():
         if count == 0:
             print(f"Warning: no training samples produced for class '{cls}'")

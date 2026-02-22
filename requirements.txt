@@ -3,3 +3,4 @@ mediapipe
 opencv-python
 numpy<2
 scikit-learn
+matplotlib

@@ -5,6 +5,8 @@ import subprocess
 from collections import defaultdict
 from pathlib import Path
 
+import cv2
+
 
 def sanitize_name(name):
     sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", name.strip())
@@ -31,9 +33,112 @@ def parse_float(v):
         return None
 
 
+def normalize_field_name(name):
+    return (name or "").strip().lstrip("\ufeff")
+
+
+def normalize_row_keys(row):
+    return {normalize_field_name(k): v for k, v in row.items()}
+
+
+def cut_with_ffmpeg(
+    ffmpeg_bin,
+    video_path,
+    out_file,
+    start,
+    end,
+    copy_codec=False,
+    dry_run=False,
+):
+    if copy_codec:
+        cmd = [
+            ffmpeg_bin,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            f"{start:.3f}",
+            "-to",
+            f"{end:.3f}",
+            "-i",
+            str(video_path),
+            "-c",
+            "copy",
+            str(out_file),
+        ]
+    else:
+        cmd = [
+            ffmpeg_bin,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            f"{start:.3f}",
+            "-to",
+            f"{end:.3f}",
+            "-i",
+            str(video_path),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "23",
+            "-an",
+            str(out_file),
+        ]
+    if dry_run:
+        print("[DRY-RUN][ffmpeg]", " ".join(cmd))
+        return
+    subprocess.run(cmd, check=True)
+
+
+def cut_with_opencv(video_path, out_file, start, end, dry_run=False):
+    if dry_run:
+        print(
+            "[DRY-RUN][opencv]",
+            f"video={video_path} start={start:.3f}s end={end:.3f}s out={out_file}",
+        )
+        return
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    if width <= 0 or height <= 0:
+        cap.release()
+        raise RuntimeError(f"Invalid frame size for video: {video_path}")
+
+    start_frame = max(int(round(start * fps)), 0)
+    end_frame = max(int(round(end * fps)), start_frame + 1)
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(str(out_file), fourcc, fps, (width, height))
+    if not writer.isOpened():
+        cap.release()
+        raise RuntimeError(f"Cannot open output writer: {out_file}")
+
+    frame_idx = start_frame
+    while frame_idx <= end_frame:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        writer.write(frame)
+        frame_idx += 1
+
+    writer.release()
+    cap.release()
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Cut video segments into class subfolders using ffmpeg."
+        description="Cut video segments into class subfolders (ffmpeg/OpenCV backend)."
     )
     parser.add_argument("--video", required=True, help="Source long video path")
     parser.add_argument("--segments-csv", required=True, help="Segments CSV path")
@@ -48,11 +153,22 @@ def main():
         default=0.5,
         help="Skip segments shorter than this duration (seconds).",
     )
+    parser.add_argument(
+        "--backend",
+        choices=["auto", "ffmpeg", "opencv"],
+        default="auto",
+        help="Cut backend. auto=ffmpeg when available, otherwise opencv.",
+    )
     parser.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name")
     parser.add_argument(
         "--copy-codec",
         action="store_true",
         help="Use stream copy instead of re-encode (faster but less accurate cuts).",
+    )
+    parser.add_argument(
+        "--filename-prefix",
+        default="",
+        help="Prefix for output clip filenames (used to avoid collisions across multiple source videos).",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print commands only.")
     args = parser.parse_args()
@@ -65,8 +181,21 @@ def main():
         raise FileNotFoundError(f"Video not found: {video_path}")
     if not csv_path.exists():
         raise FileNotFoundError(f"Segments CSV not found: {csv_path}")
-    if not has_ffmpeg(args.ffmpeg_bin):
+
+    ffmpeg_available = has_ffmpeg(args.ffmpeg_bin)
+    if args.backend == "ffmpeg" and not ffmpeg_available:
         raise RuntimeError(f"ffmpeg not found: {args.ffmpeg_bin}")
+    if args.backend == "auto":
+        resolved_backend = "ffmpeg" if ffmpeg_available else "opencv"
+    else:
+        resolved_backend = args.backend
+    if resolved_backend == "opencv" and args.copy_codec:
+        print("[WARN] --copy-codec is ignored when backend=opencv")
+
+    prefix = sanitize_name(args.filename_prefix) if args.filename_prefix else ""
+    if prefix:
+        prefix += "__"
+    print(f"[INFO] backend={resolved_backend}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     class_counters = defaultdict(int)
@@ -76,11 +205,13 @@ def main():
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         required = {"class_id", "class_name", "start_time_s", "end_time_s"}
-        missing = required - set(reader.fieldnames or [])
+        fieldnames = {normalize_field_name(x) for x in (reader.fieldnames or [])}
+        missing = required - fieldnames
         if missing:
             raise ValueError(f"Segments CSV missing columns: {', '.join(sorted(missing))}")
 
         for row in reader:
+            row = normalize_row_keys(row)
             start = parse_float(row.get("start_time_s"))
             end = parse_float(row.get("end_time_s"))
             if start is None or end is None:
@@ -102,54 +233,26 @@ def main():
             class_dir.mkdir(parents=True, exist_ok=True)
 
             class_counters[class_name] += 1
-            out_file = class_dir / f"seg_{class_counters[class_name]:06d}.mp4"
+            out_file = class_dir / f"{prefix}seg_{class_counters[class_name]:06d}.mp4"
 
-            if args.copy_codec:
-                cmd = [
-                    args.ffmpeg_bin,
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-y",
-                    "-ss",
-                    f"{start:.3f}",
-                    "-to",
-                    f"{end:.3f}",
-                    "-i",
-                    str(video_path),
-                    "-c",
-                    "copy",
-                    str(out_file),
-                ]
+            if resolved_backend == "ffmpeg":
+                cut_with_ffmpeg(
+                    ffmpeg_bin=args.ffmpeg_bin,
+                    video_path=video_path,
+                    out_file=out_file,
+                    start=start,
+                    end=end,
+                    copy_codec=args.copy_codec,
+                    dry_run=args.dry_run,
+                )
             else:
-                cmd = [
-                    args.ffmpeg_bin,
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-y",
-                    "-ss",
-                    f"{start:.3f}",
-                    "-to",
-                    f"{end:.3f}",
-                    "-i",
-                    str(video_path),
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "veryfast",
-                    "-crf",
-                    "23",
-                    "-an",
-                    str(out_file),
-                ]
-
-            if args.dry_run:
-                print("[DRY-RUN]", " ".join(cmd))
-                produced += 1
-                continue
-
-            subprocess.run(cmd, check=True)
+                cut_with_opencv(
+                    video_path=video_path,
+                    out_file=out_file,
+                    start=start,
+                    end=end,
+                    dry_run=args.dry_run,
+                )
             produced += 1
 
     print(f"[OK] Produced clips: {produced}")

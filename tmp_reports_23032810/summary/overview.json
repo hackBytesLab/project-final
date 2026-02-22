@@ -1,0 +1,73 @@
+{
+  "validation_mode": "holdout-kfold",
+  "split_unit_requested": "sample",
+  "split_unit_effective": "sample",
+  "num_folds": 2,
+  "test_size": 0.2,
+  "total_samples": 200,
+  "class_distribution": {
+    "class_0": 52,
+    "class_1": 52,
+    "class_2": 52,
+    "class_3": 44
+  },
+  "cv_aggregate": {
+    "accuracy": {
+      "mean": 0.2625,
+      "std": 0.0
+    },
+    "macro_precision": {
+      "mean": 0.065625,
+      "std": 0.0
+    },
+    "macro_recall": {
+      "mean": 0.25,
+      "std": 0.0
+    },
+    "macro_f1": {
+      "mean": 0.10396039603960396,
+      "std": 0.0
+    },
+    "weighted_precision": {
+      "mean": 0.06890625,
+      "std": 0.0
+    },
+    "weighted_recall": {
+      "mean": 0.2625,
+      "std": 0.0
+    },
+    "weighted_f1": {
+      "mean": 0.10915841584158414,
+      "std": 0.0
+    },
+    "macro_auc": {
+      "mean": 0.483245229775131,
+      "std": 0.014467040533332531
+    },
+    "micro_auc": {
+      "mean": 0.5093229166666666,
+      "std": 0.002656249999999971
+    },
+    "weighted_auc": {
+      "mean": 0.47510601085249116,
+      "std": 0.0156595486517917
+    }
+  },
+  "split_info": {
+    "dev_samples": 160,
+    "holdout_samples": 40
+  },
+  "holdout_metrics": {
+    "accuracy": 0.225,
+    "macro_precision": 0.05625,
+    "macro_recall": 0.25,
+    "macro_f1": 0.09183673469387756,
+    "weighted_precision": 0.050624999999999996,
+    "weighted_recall": 0.225,
+    "weighted_f1": 0.0826530612244898,
+    "macro_auc": 0.48786508484923385,
+    "micro_auc": 0.4804166666666666,
+    "weighted_auc": 0.47548016314423436
+  },
+  "model_output": "models\\tmp_model_23032810.h5"
+}

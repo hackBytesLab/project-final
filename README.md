@@ -21,13 +21,15 @@ Dependencies หลัก:
 - `opencv-python`
 - `numpy<2`
 - `scikit-learn`
+- `matplotlib`
 
 ## 2) ไฟล์สำคัญ
 
 - `main.py`: real-time inference จากกล้อง + LINE alert
 - `infer_video.py`: infer วิดีโอยาวและ export ช่วงเวลา
 - `video_to_dataset.py`: แปลงวิดีโอในโฟลเดอร์คลาสเป็น `data/X.npy`, `data/y.npy`
-- `train.py`: เทรนโมเดล LSTM
+- `train.py`: เทรนโมเดล LSTM + รองรับ `split / kfold / holdout-kfold` และรายงาน ROC/AUC/CM
+- `tools/build_dataset_from_long_videos.py`: one-command pipeline สำหรับหลายวิดีโอ (infer -> filter -> cut -> dataset)
 - `tools/test_line_alert.py`: ทดสอบส่ง LINE โดยตรง (ไม่ต้องเปิดกล้อง/โมเดล)
 - `tools/run_auto_label_pipeline.ps1`: one-shot pipeline บน Windows
 
@@ -109,6 +111,18 @@ python main.py --camera pi --model models/lstm_fall_model_v2.h5 --labels Fall,No
 
 ## 6) Pipeline เทรนแบบ Step-by-step
 
+### 6.0 Quick Start จาก `Data/train.mp4` + `Data/train2.mp4` (แนะนำ)
+
+```bash
+python tools/build_dataset_from_long_videos.py --videos Data/train.mp4,Data/train2.mp4 --model models/lstm_fall_model.h5 --labels Fall,No_Fall,Pre-Fall,Falling --backend auto
+```
+
+แล้วเทรนด้วย holdout + k-fold:
+
+```bash
+python train.py --data-dir data --validation-mode holdout-kfold --num-folds 5 --test-size 0.2 --split-unit clip --meta-csv data/sample_meta.csv --epochs 30 --batch-size 32 --out models/lstm_fall_model_v2.h5 --reports-dir work_csv/eval --labels Fall,No_Fall,Pre-Fall,Falling
+```
+
 ### 6.1 เตรียมโฟลเดอร์งาน
 
 ```bash
@@ -139,10 +153,10 @@ python tools/filter_segments.py --input-csv work_csv/segments_named.csv --output
 
 แก้ช่วงที่ผิดด้วยสายตา และบันทึกเป็น `work_csv/segments_final.csv`
 
-### 6.5 ตัดคลิปลงโฟลเดอร์คลาส (ต้องมี ffmpeg)
+### 6.5 ตัดคลิปลงโฟลเดอร์คลาส (รองรับ ffmpeg/OpenCV)
 
 ```bash
-python tools/segments_to_clips.py --video data_long/long_train.mp4 --segments-csv work_csv/segments_final.csv --output-dir data_videos --min-duration 0.5
+python tools/segments_to_clips.py --video data_long/long_train.mp4 --segments-csv work_csv/segments_final.csv --output-dir data_videos --min-duration 0.5 --backend auto --filename-prefix long_train
 ```
 
 ### 6.6 สร้าง dataset
@@ -155,11 +169,12 @@ python video_to_dataset.py --input data_videos --output data --timesteps 30 --st
 - `data/X.npy`
 - `data/y.npy`
 - `data/class_map.json`
+- `data/sample_meta.csv`
 
 ### 6.7 เทรนโมเดลรอบใหม่
 
 ```bash
-python train.py --data-dir data --epochs 30 --batch-size 32 --out models/lstm_fall_model_v2.h5 --eval-dir work_csv --labels Fall,No_Fall,Pre-Fall,Falling
+python train.py --data-dir data --validation-mode holdout-kfold --num-folds 5 --test-size 0.2 --split-unit clip --meta-csv data/sample_meta.csv --epochs 30 --batch-size 32 --out models/lstm_fall_model_v2.h5 --reports-dir work_csv/eval --labels Fall,No_Fall,Pre-Fall,Falling
 ```
 
 ### 6.8 Deploy และรัน real-time
@@ -178,13 +193,18 @@ powershell -ExecutionPolicy Bypass -File tools/run_auto_label_pipeline.ps1 -Vide
 
 1. ทดสอบ `tools/test_line_alert.py` แล้วส่งเข้า LINE สำเร็จ
 2. มี `data/X.npy` และ `data/y.npy`
-3. เทรนแล้วได้ `models/lstm_fall_model_v2.h5`
-4. ได้รายงานใน `work_csv/`:
-- `confusion_matrix.csv`
-- `classification_report.json`
-- `classification_report.txt`
-- `metrics_summary.json`
-5. รัน `main.py` แล้วพยากรณ์ได้ต่อเนื่องและมี alert ตามคลาสที่ตั้ง
+3. มี `data/sample_meta.csv`
+4. เทรนแล้วได้ `models/lstm_fall_model_v2.h5`
+5. ได้รายงานครบใน `work_csv/eval/` เช่น:
+- `work_csv/eval/cv/fold_1/metrics_summary.json` ... `fold_5`
+- `work_csv/eval/holdout/confusion_matrix_raw.png`
+- `work_csv/eval/holdout/confusion_matrix_norm.png`
+- `work_csv/eval/holdout/roc_curve.png`
+- `work_csv/eval/holdout/auc_summary.json`
+- `work_csv/eval/summary/overview.json`
+- `work_csv/eval/summary/overview.md`
+- `work_csv/eval/summary/learning_curves.png`
+6. รัน `main.py` แล้วพยากรณ์ได้ต่อเนื่องและมี alert ตามคลาสที่ตั้ง
 
 ## 9) หมายเหตุสำคัญ
 
