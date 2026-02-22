@@ -42,7 +42,7 @@ Dependencies หลัก:
 - `models/hand_landmarker.task`
 - `models/lstm_fall_model.h5` (โมเดลเดิมสำหรับ auto-label)
 
-## 4) ค่า default ใน `.env` / `.evnv`
+## 4) ค่า default ใน `.env`
 
 ตอนนี้ตั้งค่าเริ่มต้นไว้เป็น Pi Camera:
 - `CAMERA_MODE=pi`
@@ -55,7 +55,7 @@ Dependencies หลัก:
 - `LINE_USER_ID=`
 
 หมายเหตุ:
-- `main.py` จะโหลดค่าจาก `.env` หรือ `.evnv` อัตโนมัติ (ถ้ามี)
+- `main.py` จะโหลดค่าจาก `.env` อัตโนมัติ (ถ้ามี)
 - CLI arguments จะ override ค่าจากไฟล์เสมอ
 
 ## 5) Step-by-step ตั้งแต่เริ่มต้น
