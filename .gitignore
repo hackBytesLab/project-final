@@ -22,3 +22,9 @@ refs/*.mkv
 # Trained models
 models/*.h5
 models/*.keras
+data_5fold*/
+data_videos_chunked/
+artifacts/
+tmp_*/
+work_csv/
+models/*.tflite

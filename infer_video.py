@@ -64,7 +64,7 @@ def infer_on_video(
     if not os.path.exists(model_path):
         raise FileNotFoundError('Model file not found: ' + model_path)
 
-    model = load_model(model_path)
+    model = load_model(model_path, compile=False)
     model_input_shape = model.input_shape
     if isinstance(model_input_shape, list):
         model_input_shape = model_input_shape[0]
@@ -87,14 +87,12 @@ def infer_on_video(
 
     # Read all frames and extract features
     features = []
-    frames = []
     print('Extracting features from video...')
     success = True
     while success:
         success, frame = cap.read()
         if not success:
             break
-        frames.append(frame)
         try:
             feats = extract_frame_features(
                 frame,
@@ -184,14 +182,29 @@ def infer_on_video(
     if out_video:
         print('Rendering labeled video ->', out_video)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        h, w = frames[0].shape[:2]
+        render_cap = cv2.VideoCapture(video_path)
+        if not render_cap.isOpened():
+            raise RuntimeError('Cannot open video for rendering: ' + video_path)
+        w = int(render_cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        h = int(render_cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        if w <= 0 or h <= 0:
+            render_cap.release()
+            raise RuntimeError('Invalid render frame size for video: ' + video_path)
         out = cv2.VideoWriter(out_video, fourcc, fps, (w, h))
-        for i, frame in enumerate(frames):
+        i = 0
+        while True:
+            ok, frame = render_cap.read()
+            if not ok:
+                break
+            if i >= len(frame_labels):
+                break
             lbl = frame_labels[i]
             txt = labels_map[lbl] if labels_map and lbl in labels_map else str(lbl)
             cv2.putText(frame, txt, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
             out.write(frame)
+            i += 1
         out.release()
+        render_cap.release()
         print('Saved labeled video')
 
     cap.release()

@@ -154,6 +154,12 @@ def main():
         help="Skip segments shorter than this duration (seconds).",
     )
     parser.add_argument(
+        "--max-duration",
+        type=float,
+        default=0.0,
+        help="Split long segments into chunks of this duration in seconds (0=disable).",
+    )
+    parser.add_argument(
         "--backend",
         choices=["auto", "ffmpeg", "opencv"],
         default="auto",
@@ -223,6 +229,16 @@ def main():
                 skipped += 1
                 continue
 
+            segments = [(start, end)]
+            if args.max_duration and args.max_duration > 0 and duration > args.max_duration:
+                segments = []
+                seg_start = start
+                while seg_start < end:
+                    seg_end = min(seg_start + args.max_duration, end)
+                    if (seg_end - seg_start) >= args.min_duration:
+                        segments.append((seg_start, seg_end))
+                    seg_start = seg_end
+
             class_name = (row.get("class_name") or "").strip()
             class_id = (row.get("class_id") or "").strip()
             if not class_name:
@@ -232,28 +248,29 @@ def main():
             class_dir = output_dir / class_name
             class_dir.mkdir(parents=True, exist_ok=True)
 
-            class_counters[class_name] += 1
-            out_file = class_dir / f"{prefix}seg_{class_counters[class_name]:06d}.mp4"
+            for seg_start, seg_end in segments:
+                class_counters[class_name] += 1
+                out_file = class_dir / f"{prefix}seg_{class_counters[class_name]:06d}.mp4"
 
-            if resolved_backend == "ffmpeg":
-                cut_with_ffmpeg(
-                    ffmpeg_bin=args.ffmpeg_bin,
-                    video_path=video_path,
-                    out_file=out_file,
-                    start=start,
-                    end=end,
-                    copy_codec=args.copy_codec,
-                    dry_run=args.dry_run,
-                )
-            else:
-                cut_with_opencv(
-                    video_path=video_path,
-                    out_file=out_file,
-                    start=start,
-                    end=end,
-                    dry_run=args.dry_run,
-                )
-            produced += 1
+                if resolved_backend == "ffmpeg":
+                    cut_with_ffmpeg(
+                        ffmpeg_bin=args.ffmpeg_bin,
+                        video_path=video_path,
+                        out_file=out_file,
+                        start=seg_start,
+                        end=seg_end,
+                        copy_codec=args.copy_codec,
+                        dry_run=args.dry_run,
+                    )
+                else:
+                    cut_with_opencv(
+                        video_path=video_path,
+                        out_file=out_file,
+                        start=seg_start,
+                        end=seg_end,
+                        dry_run=args.dry_run,
+                    )
+                produced += 1
 
     print(f"[OK] Produced clips: {produced}")
     print(f"[OK] Skipped rows  : {skipped}")

@@ -156,7 +156,7 @@ python tools/filter_segments.py --input-csv work_csv/segments_named.csv --output
 ### 6.5 ตัดคลิปลงโฟลเดอร์คลาส (รองรับ ffmpeg/OpenCV)
 
 ```bash
-python tools/segments_to_clips.py --video data_long/long_train.mp4 --segments-csv work_csv/segments_final.csv --output-dir data_videos --min-duration 0.5 --backend auto --filename-prefix long_train
+python tools/segments_to_clips.py --video data_long/long_train.mp4 --segments-csv work_csv/segments_final.csv --output-dir data_videos --min-duration 0.5 --max-duration 8 --backend auto --filename-prefix long_train
 ```
 
 ### 6.6 สร้าง dataset
@@ -294,3 +294,145 @@ New env keys:
 - `NORMALIZE_GEOMETRY=0`
 - `TRACK_MAX_DISTANCE=0.20`
 - `TRACK_MAX_MISSED=15`
+
+## 11) Recommended 5-Fold Training From `train.mp4` (2026-02-22)
+
+Use this flow when you need `num-folds=5` to run reliably with full report artifacts.
+
+### 11.1 Source Video
+
+If `Data/train.mp4` is unavailable, use:
+
+`C:\Users\PC\AppData\Local\CapCut\Videos\work\train\train.mp4`
+
+### 11.2 Build `segments_final_train.csv`
+
+Run auto-label and filtering first:
+
+```bash
+python infer_video.py --video "C:\Users\PC\AppData\Local\CapCut\Videos\work\train\train.mp4" --model models/smoke_model.h5 --out-csv work_csv/segments_named_train.csv --timesteps 30 --step 1 --batch-size 64 --labels Fall,No_Fall,Pre-Fall,Falling --out-video work_csv/labeled_preview_train.mp4
+python tools/filter_segments.py --input-csv work_csv/segments_named_train.csv --output-csv work_csv/segments_filtered_train.csv --min-score 0.25 --expected-labels Fall,No_Fall,Pre-Fall,Falling
+```
+
+Then review and save to:
+
+`work_csv/segments_final_train.csv`
+
+### 11.3 Cut Clips
+
+```bash
+python tools/segments_to_clips.py --video "C:\Users\PC\AppData\Local\CapCut\Videos\work\train\train.mp4" --segments-csv work_csv/segments_final_train.csv --output-dir data_videos_chunked --min-duration 0.1 --max-duration 8 --backend auto --filename-prefix train_chunk
+```
+
+### 11.4 Build Dataset For 5-Fold
+
+Use `step=1` to increase sample count for minority classes:
+
+```bash
+python video_to_dataset.py --input data_videos_chunked --output data_5fold_chunked --timesteps 30 --step 1 --labels Fall,No_Fall,Pre-Fall,Falling --max-people 1 --max-hands 2
+```
+
+Frame split example (increase groups/samples from long clips):
+
+```bash
+python video_to_dataset.py --input data_videos_chunked --output data_5fold_chunked_split --timesteps 30 --step 1 --frame-split-size 180 --frame-split-overlap 60 --labels Fall,No_Fall,Pre-Fall,Falling --max-people 1 --max-hands 2
+```
+
+### 11.5 Train + Evaluate (`num-folds=5`)
+
+```bash
+python train.py --data-dir data_5fold_chunked --validation-mode holdout-kfold --num-folds 5 --test-size 0.2 --split-unit clip --meta-csv data_5fold_chunked/sample_meta.csv --epochs 30 --batch-size 32 --out models/lstm_fall_model_v2_chunked.h5 --reports-dir work_csv/eval_chunked --labels Fall,No_Fall,Pre-Fall,Falling --balance-mode class_weight
+```
+
+Train with augmentation example:
+
+```bash
+python train.py --data-dir data_5fold_chunked_split --validation-mode holdout-kfold --num-folds 5 --test-size 0.2 --split-unit clip --meta-csv data_5fold_chunked_split/sample_meta.csv --epochs 30 --batch-size 32 --out models/lstm_fall_model_aug.h5 --reports-dir work_csv/eval_aug --labels Fall,No_Fall,Pre-Fall,Falling --balance-mode class_weight --augment-mode minority --augment-factor 1.0 --augment-minority-ratio 0.9 --augment-noise-std 0.01 --augment-scale-range 0.05 --augment-time-shift 2 --augment-feature-dropout 0.01 --augment-time-mask-ratio 0.10
+```
+
+High-accuracy recipe (frame split + focal + augmentation):
+
+```bash
+python train.py --data-dir data_5fold_chunked_split --validation-mode holdout-kfold --num-folds 5 --test-size 0.2 --split-unit clip --meta-csv data_5fold_chunked_split/sample_meta.csv --epochs 30 --batch-size 32 --patience 7 --out models/lstm_fall_model_augsplit_acc.h5 --reports-dir work_csv/eval_augsplit_acc --labels Fall,No_Fall,Pre-Fall,Falling --balance-mode none --augment-mode minority --augment-factor 1.0 --augment-minority-ratio 0.85 --augment-noise-std 0.006 --augment-scale-range 0.03 --augment-time-shift 1 --augment-feature-dropout 0.003 --augment-time-mask-ratio 0.05 --loss-function focal --focal-gamma 1.2 --focal-alpha 0.25 --focal-alpha-mode fixed --focal-alpha-cap 4.0
+```
+
+### 11.6 Expected Outputs
+
+- `models/lstm_fall_model_v2_5fold.h5`
+- `work_csv/eval_5fold/cv/fold_1` ... `fold_5`
+- `work_csv/eval_5fold/holdout/confusion_matrix_raw.png`
+- `work_csv/eval_5fold/holdout/confusion_matrix_norm.png`
+- `work_csv/eval_5fold/holdout/roc_curve.png`
+- `work_csv/eval_5fold/holdout/auc_summary.json`
+- `work_csv/eval_5fold/summary/overview.md`
+
+## 12) Focal Loss + Threshold Tuning (2026-02-22)
+
+### 12.1 Train with Focal Loss
+
+```bash
+python train.py --data-dir data_5fold_chunked --validation-mode holdout-kfold --num-folds 5 --test-size 0.2 --split-unit clip --meta-csv data_5fold_chunked/sample_meta.csv --epochs 30 --batch-size 32 --out models/lstm_fall_model_focal.h5 --reports-dir work_csv/eval_focal --labels Fall,No_Fall,Pre-Fall,Falling --balance-mode class_weight --loss-function focal --focal-gamma 2.0 --focal-alpha 0.25
+```
+
+Notes:
+- `--loss-function categorical_crossentropy|focal`
+- `--focal-gamma` and `--focal-alpha` are used only when `--loss-function focal`
+- `--focal-alpha-mode fixed|balanced` (`balanced` builds per-class alpha from train-set frequency)
+- `--focal-alpha-cap` caps large alpha values in balanced mode
+
+Example (balanced focal alpha):
+
+```bash
+python train.py --data-dir data_5fold_chunked --validation-mode holdout-kfold --num-folds 5 --test-size 0.2 --split-unit clip --meta-csv data_5fold_chunked/sample_meta.csv --epochs 30 --batch-size 32 --out models/lstm_fall_model_focal_balanced.h5 --reports-dir work_csv/eval_focal_balanced --labels Fall,No_Fall,Pre-Fall,Falling --balance-mode none --loss-function focal --focal-gamma 2.0 --focal-alpha-mode balanced --focal-alpha-cap 4.0
+```
+
+### 12.2 Recommend Per-Class Thresholds from ROC
+
+```bash
+python tools/recommend_class_thresholds.py --eval-dir work_csv/eval_focal --labels Fall,No_Fall,Pre-Fall,Falling --output-json work_csv/compare/recommended_thresholds.json --output-md work_csv/compare/recommended_thresholds.md
+```
+
+### 12.3 Runtime with Thresholds
+
+```bash
+python main.py --camera pi --model models/lstm_fall_model_focal.h5 --labels Fall,No_Fall,Pre-Fall,Falling --thresholds-json work_csv/compare/recommended_thresholds.json
+```
+
+Compatibility note:
+- Runtime/inference now loads Keras models with `compile=False`, so focal-loss models can be used without custom loss registration.
+
+## 13) Raspberry Pi 5 Optimization (TFLite)
+
+Use TFLite model on Pi 5 to reduce memory and speed up inference.
+
+### 13.1 Export `.h5` to `.tflite` (recommended: `float16`)
+
+```bash
+python tools/export_tflite.py --keras-model models/lstm_fall_model_augsplit_acc_20260222_214000.h5 --output models/lstm_fall_model_augsplit_acc_20260222_214000_fp16.tflite --quantization float16 --select-tf-ops
+```
+
+Optional `int8` export:
+
+```bash
+python tools/export_tflite.py --keras-model models/lstm_fall_model_augsplit_acc_20260222_214000.h5 --output models/lstm_fall_model_augsplit_acc_20260222_214000_int8.tflite --quantization int8 --representative-x data_5fold_chunked_split/X.npy --representative-samples 256 --inference-input-type float32 --inference-output-type float32 --select-tf-ops
+```
+
+### 13.2 Install runtime on Pi 5
+
+```bash
+pip install tensorflow mediapipe opencv-python numpy
+```
+
+Notes:
+- This LSTM architecture requires `SELECT_TF_OPS` in TFLite conversion, so runtime should use `tensorflow` (Flex delegate available).
+- `tflite-runtime` only is usually not enough for this specific model.
+
+### 13.3 Run real-time on Pi 5 with TFLite
+
+```bash
+python main.py --camera pi --model models/lstm_fall_model_augsplit_acc_20260222_214000_fp16.tflite --model-threads 4 --labels Fall,No_Fall,Pre-Fall,Falling --thresholds-json work_csv/compare/recommended_thresholds_20260222_214000.json
+```
+
+Notes:
+- Keep the same feature setup as training (`--normalize-geometry`, labels order, timesteps).
+- Tune `--model-threads` (for Pi 5 usually `2-4` is a good range).

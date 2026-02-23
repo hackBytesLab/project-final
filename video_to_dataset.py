@@ -69,6 +69,8 @@ def process_videos(
     output_dir,
     timesteps=30,
     step=15,
+    frame_split_size=0,
+    frame_split_overlap=0,
     labels=None,
     max_people=1,
     max_hands=0,
@@ -129,29 +131,60 @@ def process_videos(
                 print(f"Skipping {path} (too short: {n_frames} frames)")
                 continue
 
-            # sliding window
-            for i in range(0, n_frames - timesteps + 1, step):
-                seq = frames_features[i:i + timesteps]
-                X.append(seq)
-                y.append(class_map[cls])
-                sample_counts[cls] += 1
-                clip_rel = os.path.relpath(path, input_dir).replace("\\", "/")
-                source_video = infer_source_video_id(fname)
-                sample_meta.append(
-                    {
-                        "sample_idx": sample_idx,
-                        "class_id": class_map[cls],
-                        "class_name": cls,
-                        "clip_path": clip_rel,
-                        "source_video": source_video,
-                        "window_start": i,
-                        "window_end": i + timesteps - 1,
-                        "group_id": clip_rel,
-                    }
-                )
-                sample_idx += 1
+            clip_rel = os.path.relpath(path, input_dir).replace("\\", "/")
+            source_video = infer_source_video_id(fname)
 
-            print(f"Processed {path}: frames={n_frames}, samples={(n_frames - timesteps + 1 + (step-1))//step}")
+            chunk_ranges = [(0, n_frames)]
+            if frame_split_size and frame_split_size > timesteps and n_frames > frame_split_size:
+                stride = max(1, int(frame_split_size) - int(max(0, frame_split_overlap)))
+                chunk_ranges = []
+                start = 0
+                while start < n_frames:
+                    end = min(start + int(frame_split_size), n_frames)
+                    if end - start >= timesteps:
+                        chunk_ranges.append((start, end))
+                    if end >= n_frames:
+                        break
+                    start += stride
+                tail_start = max(0, n_frames - int(frame_split_size))
+                tail = (tail_start, n_frames)
+                if tail[1] - tail[0] >= timesteps and tail not in chunk_ranges:
+                    chunk_ranges.append(tail)
+                chunk_ranges = sorted(set(chunk_ranges), key=lambda x: x[0])
+
+            samples_before = sample_counts[cls]
+            for chunk_idx, (chunk_start, chunk_end) in enumerate(chunk_ranges):
+                chunk_frames = frames_features[chunk_start:chunk_end]
+                chunk_len = len(chunk_frames)
+                if chunk_len < timesteps:
+                    continue
+                group_id = clip_rel if len(chunk_ranges) == 1 else f"{clip_rel}#chunk_{chunk_idx:03d}"
+
+                # sliding window
+                for i in range(0, chunk_len - timesteps + 1, step):
+                    seq = chunk_frames[i:i + timesteps]
+                    X.append(seq)
+                    y.append(class_map[cls])
+                    sample_counts[cls] += 1
+                    window_start = chunk_start + i
+                    sample_meta.append(
+                        {
+                            "sample_idx": sample_idx,
+                            "class_id": class_map[cls],
+                            "class_name": cls,
+                            "clip_path": clip_rel,
+                            "source_video": source_video,
+                            "window_start": window_start,
+                            "window_end": window_start + timesteps - 1,
+                            "group_id": group_id,
+                        }
+                    )
+                    sample_idx += 1
+
+            produced = sample_counts[cls] - samples_before
+            print(
+                f"Processed {path}: frames={n_frames}, chunks={len(chunk_ranges)}, samples={produced}"
+            )
 
     if X:
         X = np.array(X, dtype=np.float32)
@@ -198,6 +231,18 @@ def main():
     parser.add_argument('--output', default='data', help='Output folder to save X.npy and y.npy')
     parser.add_argument('--timesteps', type=int, default=30)
     parser.add_argument('--step', type=int, default=15, help='Sliding window step (default 50%% overlap)')
+    parser.add_argument(
+        '--frame-split-size',
+        type=int,
+        default=0,
+        help='Optional frame chunk size before sliding-window (0=disable).',
+    )
+    parser.add_argument(
+        '--frame-split-overlap',
+        type=int,
+        default=0,
+        help='Overlap in frames between chunk windows when --frame-split-size > 0.',
+    )
     parser.add_argument('--labels', default=DEFAULT_LABELS, help='Comma-separated class names in fixed output order')
     parser.add_argument('--max-people', type=int, default=1, help='Pose slots used in features')
     parser.add_argument('--max-hands', type=int, default=0, help='Hand slots used in features (0=2*max-people)')
@@ -214,6 +259,8 @@ def main():
         args.output,
         timesteps=args.timesteps,
         step=args.step,
+        frame_split_size=args.frame_split_size,
+        frame_split_overlap=args.frame_split_overlap,
         labels=labels,
         max_people=args.max_people,
         max_hands=args.max_hands,
