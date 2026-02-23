@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+.venv/
 
 # Local secrets / env files
 .env
@@ -28,3 +29,9 @@ artifacts/
 tmp_*/
 work_csv/
 models/*.tflite
+
+# Keep sample-flow evaluation visible in IDE while ignoring other work_csv artifacts.
+!work_csv/
+work_csv/*
+!work_csv/eval_sample_flow/
+!work_csv/eval_sample_flow/**
