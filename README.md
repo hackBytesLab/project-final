@@ -27,17 +27,18 @@ Dependencies หลัก:
 
 - `main.py`: real-time inference จากกล้อง + LINE alert
 - `infer_video.py`: infer วิดีโอยาวและ export ช่วงเวลา
-- `video_to_dataset.py`: แปลงวิดีโอในโฟลเดอร์คลาสเป็น `data/X.npy`, `data/y.npy`
+- `video_to_dataset.py`: แปลงวิดีโอในโฟลเดอร์คลาสเป็น `<output>/X.npy`, `<output>/y.npy` (เช่น `data_sample/`)
 - `train.py`: เทรนโมเดล LSTM + รองรับ `split / kfold / holdout-kfold` และรายงาน ROC/AUC/CM
 - `tools/build_dataset_from_long_videos.py`: one-command pipeline สำหรับหลายวิดีโอ (infer -> filter -> cut -> dataset)
 - `tools/test_line_alert.py`: ทดสอบส่ง LINE โดยตรง (ไม่ต้องเปิดกล้อง/โมเดล)
 - `tools/run_auto_label_pipeline.ps1`: one-shot pipeline บน Windows
 
-## 3) ไฟล์โมเดลที่ต้องมีใน `models/`
+## 3) ไฟล์โมเดลใน `models/`
 
 - `models/pose_landmarker_lite.task`
 - `models/hand_landmarker.task`
-- `models/lstm_fall_model.h5` (โมเดลเดิมสำหรับ auto-label)
+- `models/lstm_sample_flow.h5` (ไฟล์ตัวอย่างที่มีใน repo สำหรับลองรันทันที)
+- `models/lstm_fall_model.h5` (ทางเลือกสำหรับ production/โมเดลเดิม หากมีไฟล์นี้ในเครื่อง)
 
 ## 4) ตั้งค่า Environment (อัปเดตล่าสุด)
 
@@ -50,7 +51,10 @@ Copy-Item .evnv.example .evnv
 2. ใส่ค่าที่จำเป็นใน `.evnv` (หรือใช้ `.env` ก็ได้):
 
 ```env
-MODEL_PATH=models/lstm_fall_model.h5
+# sample/demo (มีไฟล์ใน repo ตอนนี้)
+MODEL_PATH=models/lstm_sample_flow.h5
+# production (ใช้เมื่อเตรียมไฟล์โมเดลเอง)
+# MODEL_PATH=models/lstm_fall_model.h5
 CAMERA_MODE=pi
 CAMERA_SOURCE=
 LINE_CHANNEL_ACCESS_TOKEN=
@@ -63,6 +67,7 @@ LABELS=Fall,No_Fall,Pre-Fall,Falling
 3. กฎการโหลดค่า:
 - `main.py` โหลด `.env` ก่อน แล้ว fallback ไป `.evnv`
 - ถ้าใส่ CLI args ค่า CLI จะทับ env
+- ค่า default ในโค้ดยังเป็น `models/lstm_fall_model.h5` และ data โฟลเดอร์ `data` เพื่อคง backward compatibility
 
 4. ความปลอดภัย:
 - เก็บ token เฉพาะไฟล์ local (`.env`/`.evnv`) เท่านั้น
@@ -95,13 +100,13 @@ python tools/test_line_alert.py --mode broadcast --token "dummy" --dry-run
 Broadcast เมื่อเจอ `Fall`:
 
 ```bash
-python main.py --camera pi --model models/lstm_fall_model_v2.h5 --labels Fall,No_Fall,Pre-Fall,Falling --line-token "<LINE_CHANNEL_ACCESS_TOKEN>" --alert-classes Fall --line-cooldown-seconds 60
+python main.py --camera pi --model models/lstm_sample_flow.h5 --labels Fall,No_Fall,Pre-Fall,Falling --line-token "<LINE_CHANNEL_ACCESS_TOKEN>" --alert-classes Fall --line-cooldown-seconds 60
 ```
 
 Push เมื่อเจอ `Fall`:
 
 ```bash
-python main.py --camera pi --model models/lstm_fall_model_v2.h5 --labels Fall,No_Fall,Pre-Fall,Falling --line-token "<LINE_CHANNEL_ACCESS_TOKEN>" --line-user-id "<USER_OR_GROUP_ID>" --alert-classes Fall --line-cooldown-seconds 60
+python main.py --camera pi --model models/lstm_sample_flow.h5 --labels Fall,No_Fall,Pre-Fall,Falling --line-token "<LINE_CHANNEL_ACCESS_TOKEN>" --line-user-id "<USER_OR_GROUP_ID>" --alert-classes Fall --line-cooldown-seconds 60
 ```
 
 ผลลัพธ์ที่ควรเห็นใน console:
@@ -111,15 +116,16 @@ python main.py --camera pi --model models/lstm_fall_model_v2.h5 --labels Fall,No
 
 ## 6) Pipeline เทรนแบบ Step-by-step
 
-### 6.0 Quick Start จาก `Data/train.mp4` + `Data/train2.mp4` (แนะนำ)
+### 6.0 Quick Start (รันทันทีด้วยไฟล์ที่มีใน repo)
 
 ```bash
-python tools/build_dataset_from_long_videos.py --videos Data/train.mp4,Data/train2.mp4 --model models/lstm_fall_model.h5 --labels Fall,No_Fall,Pre-Fall,Falling --backend auto
+python train.py --data-dir data_sample --validation-mode holdout-kfold --num-folds 5 --test-size 0.2 --split-unit clip --meta-csv data_sample/sample_meta.csv --epochs 1 --batch-size 16 --out models/lstm_sample_flow_smoke.h5 --reports-dir work_csv/eval_sample_flow_smoke --labels Fall,No_Fall,Pre-Fall,Falling
 ```
 
-แล้วเทรนด้วย holdout + k-fold:
+ถ้าต้องการทำ full pipeline (production) จากวิดีโอยาว:
 
 ```bash
+python tools/build_dataset_from_long_videos.py --videos Data/train.mp4,Data/train2.mp4 --model models/lstm_sample_flow.h5 --labels Fall,No_Fall,Pre-Fall,Falling --backend auto
 python train.py --data-dir data --validation-mode holdout-kfold --num-folds 5 --test-size 0.2 --split-unit clip --meta-csv data/sample_meta.csv --epochs 30 --batch-size 32 --out models/lstm_fall_model_v2.h5 --reports-dir work_csv/eval --labels Fall,No_Fall,Pre-Fall,Falling
 ```
 
@@ -136,13 +142,13 @@ python tools/prepare_workspace.py
 3. รัน:
 
 ```bash
-python tools/verify_class_order.py --manifest refs/refs_manifest.csv --model models/lstm_fall_model.h5 --out-dir work_csv --timesteps 30 --step 1 --batch-size 64
+python tools/verify_class_order.py --manifest refs/refs_manifest.csv --model models/lstm_sample_flow.h5 --out-dir work_csv --timesteps 30 --step 1 --batch-size 64
 ```
 
 ### 6.3 Auto-label วิดีโอยาว
 
 ```bash
-python infer_video.py --video data_long/long_train.mp4 --model models/lstm_fall_model.h5 --out-csv work_csv/segments_named.csv --timesteps 30 --step 1 --batch-size 64 --labels Fall,No_Fall,Pre-Fall,Falling --out-video work_csv/labeled_preview_named.mp4
+python infer_video.py --video data_long/long_train.mp4 --model models/lstm_sample_flow.h5 --out-csv work_csv/segments_named.csv --timesteps 30 --step 1 --batch-size 64 --labels Fall,No_Fall,Pre-Fall,Falling --out-video work_csv/labeled_preview_named.mp4
 ```
 
 ### 6.4 Filter ตามความมั่นใจ
@@ -165,7 +171,7 @@ python tools/segments_to_clips.py --video data_long/long_train.mp4 --segments-cs
 python video_to_dataset.py --input data_videos --output data --timesteps 30 --step 15 --labels Fall,No_Fall,Pre-Fall,Falling
 ```
 
-ผลลัพธ์ที่ต้องได้:
+ผลลัพธ์ที่ต้องได้ (กรณี output เป็น `data`):
 - `data/X.npy`
 - `data/y.npy`
 - `data/class_map.json`
@@ -186,15 +192,15 @@ python main.py --camera pi --model models/lstm_fall_model_v2.h5 --labels Fall,No
 ## 7) One-shot Pipeline (Windows)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/run_auto_label_pipeline.ps1 -VideoPath data_long/long_train.mp4 -ModelPath models/lstm_fall_model.h5 -Labels Fall,No_Fall,Pre-Fall,Falling -RunTrain -TrainOut models/lstm_fall_model_v2.h5
+powershell -ExecutionPolicy Bypass -File tools/run_auto_label_pipeline.ps1 -VideoPath data_long/long_train.mp4 -ModelPath models/lstm_sample_flow.h5 -Labels Fall,No_Fall,Pre-Fall,Falling -RunTrain -TrainOut models/lstm_fall_model_v2.h5
 ```
 
 ## 8) Checklist ก่อนถือว่าใช้งานได้
 
 1. ทดสอบ `tools/test_line_alert.py` แล้วส่งเข้า LINE สำเร็จ
-2. มี `data/X.npy` และ `data/y.npy`
-3. มี `data/sample_meta.csv`
-4. เทรนแล้วได้ `models/lstm_fall_model_v2.h5`
+2. มี dataset พร้อมใช้งาน (`data/` หรือ `data_sample/`) เช่น `X.npy`, `y.npy`, `sample_meta.csv`
+3. มีโมเดลพร้อมรัน (`models/lstm_sample_flow.h5` สำหรับ sample/demo หรือโมเดลที่เทรนเอง)
+4. ถ้าเทรนใหม่แล้ว ได้โมเดล output ตามที่กำหนด (เช่น `models/lstm_fall_model_v2.h5`)
 5. ได้รายงานครบใน `work_csv/eval/` เช่น:
 - `work_csv/eval/cv/fold_1/metrics_summary.json` ... `fold_5`
 - `work_csv/eval/holdout/confusion_matrix_raw.png`
@@ -228,17 +234,17 @@ Examples:
 
 ```bash
 # Single-person runtime (stable baseline)
-python main.py --model models/lstm_fall_model.h5 --detect-people 1 --inference-mode frame
+python main.py --model models/lstm_sample_flow.h5 --detect-people 1 --inference-mode frame
 ```
 
 ```bash
 # Multi-person runtime with single-person (150-feature) model
-python main.py --model models/lstm_fall_model.h5 --detect-people 4 --inference-mode per-person
+python main.py --model models/lstm_sample_flow.h5 --detect-people 4 --inference-mode per-person
 ```
 
 ```bash
 # Auto mode (recommended default)
-python main.py --model models/lstm_fall_model.h5 --detect-people 4 --inference-mode auto
+python main.py --model models/lstm_sample_flow.h5 --detect-people 4 --inference-mode auto
 ```
 
 ### 10.2 Person Tracking Controls (`main.py`)
@@ -251,7 +257,7 @@ In `per-person` mode, track association is center-distance based.
 Example:
 
 ```bash
-python main.py --model models/lstm_fall_model.h5 --detect-people 4 --inference-mode per-person --track-max-distance 0.20 --track-max-missed 15
+python main.py --model models/lstm_sample_flow.h5 --detect-people 4 --inference-mode per-person --track-max-distance 0.20 --track-max-missed 15
 ```
 
 ### 10.3 Geometry Normalization
@@ -284,7 +290,7 @@ python main.py --model models/lstm_fall_model_norm.h5 --detect-people 4 --infere
 Example:
 
 ```bash
-python tools/build_dataset_from_long_videos.py --videos Data/train.mp4,Data/train2.mp4 --model models/lstm_fall_model.h5 --labels Fall,No_Fall,Pre-Fall,Falling --backend auto --max-people 1 --max-hands 2 --normalize-geometry
+python tools/build_dataset_from_long_videos.py --videos Data/train.mp4,Data/train2.mp4 --model models/lstm_sample_flow.h5 --labels Fall,No_Fall,Pre-Fall,Falling --backend auto --max-people 1 --max-hands 2 --normalize-geometry
 ```
 
 ### 10.5 `.evnv.example` New Keys
@@ -310,7 +316,7 @@ If `Data/train.mp4` is unavailable, use:
 Run auto-label and filtering first:
 
 ```bash
-python infer_video.py --video "C:\Users\PC\AppData\Local\CapCut\Videos\work\train\train.mp4" --model models/smoke_model.h5 --out-csv work_csv/segments_named_train.csv --timesteps 30 --step 1 --batch-size 64 --labels Fall,No_Fall,Pre-Fall,Falling --out-video work_csv/labeled_preview_train.mp4
+python infer_video.py --video "C:\Users\PC\AppData\Local\CapCut\Videos\work\train\train.mp4" --model models/lstm_sample_flow.h5 --out-csv work_csv/segments_named_train.csv --timesteps 30 --step 1 --batch-size 64 --labels Fall,No_Fall,Pre-Fall,Falling --out-video work_csv/labeled_preview_train.mp4
 python tools/filter_segments.py --input-csv work_csv/segments_named_train.csv --output-csv work_csv/segments_filtered_train.csv --min-score 0.25 --expected-labels Fall,No_Fall,Pre-Fall,Falling
 ```
 
