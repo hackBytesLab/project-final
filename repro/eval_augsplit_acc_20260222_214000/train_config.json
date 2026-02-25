@@ -1,0 +1,50 @@
+﻿{
+    "args":  {
+                 "labels":  [
+                                "Fall",
+                                "No_Fall",
+                                "Pre-Fall",
+                                "Falling"
+                            ],
+                 "loss_function":  "focal",
+                 "augment_feature_dropout":  0.003,
+                 "augment_scale_range":  0.03,
+                 "augment_time_shift":  1,
+                 "epochs":  30,
+                 "augment_minority_ratio":  0.85,
+                 "split_unit":  "clip",
+                 "augment_noise_std":  0.006,
+                 "reports_dir":  "work_csv/eval_augsplit_acc_20260222_214000",
+                 "test_size":  0.2,
+                 "patience":  7,
+                 "meta_csv":  "data_5fold_chunked_split/sample_meta.csv",
+                 "focal_gamma":  1.2,
+                 "focal_alpha_cap":  4,
+                 "augment_time_mask_ratio":  0.05,
+                 "augment_mode":  "minority",
+                 "augment_factor":  1,
+                 "validation_mode":  "holdout-kfold",
+                 "random_state":  42,
+                 "balance_mode":  "none",
+                 "out":  "models/lstm_fall_model_augsplit_acc_20260222_214000.h5",
+                 "focal_alpha":  0.25,
+                 "data_dir":  "data_5fold_chunked_split",
+                 "num_folds":  5,
+                 "batch_size":  32,
+                 "focal_alpha_mode":  "fixed"
+             },
+    "data_files":  [
+                       "data_5fold_chunked_split/X.npy",
+                       "data_5fold_chunked_split/y.npy",
+                       "data_5fold_chunked_split/class_map.json",
+                       "data_5fold_chunked_split/sample_meta.csv"
+                   ],
+    "sources":  [
+                    "work_csv/eval_augsplit_acc_20260222_214000/summary/overview.json",
+                    "work_csv/eval_augsplit_acc_20260222_214000/holdout/metrics_summary.json",
+                    "README.md (training command template for augsplit_acc)"
+                ],
+    "command":  "python train.py --data-dir data_5fold_chunked_split --validation-mode holdout-kfold --num-folds 5 --test-size 0.2 --split-unit clip --meta-csv data_5fold_chunked_split/sample_meta.csv --epochs 30 --batch-size 32 --patience 7 --out models/lstm_fall_model_augsplit_acc_20260222_214000.h5 --reports-dir work_csv/eval_augsplit_acc_20260222_214000 --labels Fall,No_Fall,Pre-Fall,Falling --balance-mode none --augment-mode minority --augment-factor 1.0 --augment-minority-ratio 0.85 --augment-noise-std 0.006 --augment-scale-range 0.03 --augment-time-shift 1 --augment-feature-dropout 0.003 --augment-time-mask-ratio 0.05 --loss-function focal --focal-gamma 1.2 --focal-alpha 0.25 --focal-alpha-mode fixed --focal-alpha-cap 4.0 --random-state 42",
+    "target_holdout_accuracy":  0.91804746977160767,
+    "run_id":  "eval_augsplit_acc_20260222_214000"
+}

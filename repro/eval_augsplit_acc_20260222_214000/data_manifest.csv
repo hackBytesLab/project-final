@@ -1,0 +1,5 @@
+﻿"path","size_bytes","last_write_utc","sha256"
+"data_5fold_chunked_split/X.npy","206424128","2026-02-22T13:26:35Z","ffb4e52ef6ac069503b33e8bc55418b65e33f9d999bbfb8820dfb65bb10228db"
+"data_5fold_chunked_split/y.npy","46000","2026-02-22T13:26:35Z","4619176a7d13a0d8de7bd1c9acad0ce5dbe89bd35a3c43b455f1a38f813a613b"
+"data_5fold_chunked_split/class_map.json","69","2026-02-22T13:26:35Z","92816e1e76d4dc3a9f5f51a9ec859f6ba261df5225ab92de44fb0e4107466dc3"
+"data_5fold_chunked_split/sample_meta.csv","1318635","2026-02-22T13:26:35Z","9a451169dc77ca5c0a8d0ed011f8a7df9ef771f6f3255efde748bb15fac3e576"

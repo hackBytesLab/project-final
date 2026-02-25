@@ -1,0 +1,93 @@
+{
+  "validation_mode": "holdout-kfold",
+  "split_unit_requested": "clip",
+  "split_unit_effective": "clip",
+  "balance_mode": "none",
+  "augment_mode": "minority",
+  "augment_factor": 1.0,
+  "loss_function": "focal",
+  "focal_alpha_mode": "fixed",
+  "focal_alpha_cap": 4.0,
+  "focal_gamma": 1.2,
+  "focal_alpha": 0.25,
+  "num_folds": 5,
+  "test_size": 0.2,
+  "total_samples": 11468,
+  "class_distribution": {
+    "Fall": 2615,
+    "No_Fall": 7506,
+    "Pre-Fall": 70,
+    "Falling": 1277
+  },
+  "cv_aggregate": {
+    "accuracy": {
+      "mean": 0.913165363418911,
+      "std": 0.06634902647320105
+    },
+    "macro_precision": {
+      "mean": 0.7562565507527813,
+      "std": 0.16506452029648186
+    },
+    "macro_recall": {
+      "mean": 0.7423752362082153,
+      "std": 0.17166140501466465
+    },
+    "macro_f1": {
+      "mean": 0.745289989339866,
+      "std": 0.16445082182017337
+    },
+    "weighted_precision": {
+      "mean": 0.9142127958692194,
+      "std": 0.06785418123908002
+    },
+    "weighted_recall": {
+      "mean": 0.913165363418911,
+      "std": 0.06634902647320105
+    },
+    "weighted_f1": {
+      "mean": 0.9120809531453548,
+      "std": 0.0669698589601612
+    },
+    "macro_auc": {
+      "mean": 0.9547678248126064,
+      "std": 0.04364457145560963
+    },
+    "micro_auc": {
+      "mean": 0.9788268881617285,
+      "std": 0.01870147297531608
+    },
+    "weighted_auc": {
+      "mean": 0.9591082414773837,
+      "std": 0.03305967490819536
+    }
+  },
+  "final_balance": {
+    "mode": "none",
+    "focal_alpha_mode": "fixed",
+    "focal_alpha": 0.25,
+    "augment_mode": "minority",
+    "augment_factor": 1.0,
+    "augment_minority_ratio": 0.85,
+    "augmented_samples": 2285,
+    "train_samples_before_aug": 7368,
+    "train_samples_after_aug": 9653
+  },
+  "split_info": {
+    "dev_samples": 9235,
+    "holdout_samples": 2233,
+    "group_overlap_dev_holdout": 0
+  },
+  "holdout_metrics": {
+    "accuracy": 0.9180474697716077,
+    "macro_precision": 0.8423184643515756,
+    "macro_recall": 0.9420694433550344,
+    "macro_f1": 0.8598432560158886,
+    "weighted_precision": 0.9508770796796834,
+    "weighted_recall": 0.9180474697716077,
+    "weighted_f1": 0.9267653274629568,
+    "macro_auc": 0.9927622344351843,
+    "micro_auc": 0.9878888889111723,
+    "weighted_auc": 0.9852784005965679
+  },
+  "model_output": "models\\lstm_fall_model_augsplit_acc_20260222_214000.h5"
+}
