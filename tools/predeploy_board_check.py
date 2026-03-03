@@ -116,7 +116,14 @@ def inspect_tflite_model(model_path):
     shape_signature = input_details.get("shape_signature", input_shape)
     if len(input_shape) != 3:
         raise ValueError(f"Unsupported TFLite input shape: {input_shape}")
-    timesteps = int(shape_signature[1]) if int(shape_signature[1]) > 0 else int(input_shape[1])
+    if int(shape_signature[1]) > 0:
+        timesteps = int(shape_signature[1])
+    elif int(input_shape[1]) > 1:
+        timesteps = int(input_shape[1])
+    else:
+        # Dynamic TFLite sequence models often expose [1, 1, F] at allocation time.
+        # Keep runtime-compatible default instead of forcing 1 timestep.
+        timesteps = 30
     num_features = int(shape_signature[-1]) if int(shape_signature[-1]) > 0 else int(input_shape[-1])
     if timesteps <= 0 or num_features <= 0:
         raise ValueError(f"Invalid TFLite input shape/signature: {input_shape} / {shape_signature}")
@@ -136,6 +143,9 @@ def inspect_tflite_model(model_path):
     flex_warning = ""
     smoke_infer_ok = True
     try:
+        input_idx = int(input_details["index"])
+        if list(input_shape) != [1, timesteps, num_features]:
+            interpreter.resize_tensor_input(input_idx, [1, timesteps, num_features], strict=False)
         interpreter.allocate_tensors()
         input_details = interpreter.get_input_details()[0]
         output_details = interpreter.get_output_details()[0]

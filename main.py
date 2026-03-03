@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -22,6 +23,50 @@ except ImportError:
 DEFAULT_LABELS = "Fall,No_Fall,Pre-Fall,Falling"
 TIMESTEPS = 30
 SINGLE_PERSON_FEATURES = 150
+
+
+class PiCameraCapture:
+    def __init__(self, width=1280, height=720):
+        try:
+            from picamera2 import Picamera2
+        except ModuleNotFoundError as e:
+            # On Raspberry Pi, libcamera bindings are often installed via apt in
+            # /usr/lib/python3/dist-packages while app runs in venv.
+            if "libcamera" in str(e):
+                dist_pkg = "/usr/lib/python3/dist-packages"
+                if dist_pkg not in sys.path:
+                    sys.path.append(dist_pkg)
+                from picamera2 import Picamera2
+            else:
+                raise
+
+        self.picam2 = Picamera2()
+        config = self.picam2.create_preview_configuration(
+            main={"size": (int(width), int(height)), "format": "RGB888"}
+        )
+        self.picam2.configure(config)
+        self.picam2.start()
+
+    def isOpened(self):
+        return True
+
+    def read(self):
+        frame = self.picam2.capture_array()
+        if frame is None:
+            return False, None
+        if len(frame.shape) == 3 and frame.shape[2] == 3:
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        return True, frame
+
+    def release(self):
+        try:
+            self.picam2.stop()
+        except Exception:
+            pass
+        try:
+            self.picam2.close()
+        except Exception:
+            pass
 
 
 def parse_labels(raw_labels):
@@ -173,10 +218,33 @@ def open_camera(camera_mode, source):
         return get_iriun_camera()
 
     if camera_mode == "pi":
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            raise RuntimeError("Cannot open Pi camera at index 0")
-        return cap
+        try:
+            cap = PiCameraCapture(width=1280, height=720)
+            ret, _ = cap.read()
+            if ret:
+                return cap
+            cap.release()
+        except Exception:
+            pass
+        # Try Pi-friendly backends first to avoid GStreamer allocation failures.
+        backends = [
+            (cv2.CAP_V4L2, "v4l2"),
+            (cv2.CAP_ANY, "default"),
+        ]
+        for backend, _name in backends:
+            cap = cv2.VideoCapture(0, backend)
+            if not cap.isOpened():
+                cap.release()
+                continue
+            # Keep memory footprint low on Raspberry Pi camera pipelines.
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            ret, _ = cap.read()
+            if ret:
+                return cap
+            cap.release()
+        raise RuntimeError("Cannot open Pi camera at index 0")
 
     if camera_mode == "rtsp":
         if not source:
@@ -228,7 +296,15 @@ def load_inference_model(model_path, num_threads=0):
         num_features = int(shape_signature[-1]) if int(shape_signature[-1]) > 0 else int(input_shape[-1])
         if num_features <= 0:
             raise ValueError(f"Invalid TFLite feature dimension: {shape_signature}")
-        timesteps = int(shape_signature[1]) if int(shape_signature[1]) > 0 else TIMESTEPS
+        # Dynamic sequence models are commonly exported with input shape [1, 1, F]
+        # while the shape signature keeps timestep as -1. Use runtime default window
+        # instead of hard-coding 1 timestep in that case.
+        if int(shape_signature[1]) > 0:
+            timesteps = int(shape_signature[1])
+        elif int(input_shape[1]) > 1:
+            timesteps = int(input_shape[1])
+        else:
+            timesteps = TIMESTEPS
         return {
             "backend": "tflite",
             "model": interpreter,
@@ -615,11 +691,22 @@ def main():
         f"track_max_distance={args.track_max_distance}, track_max_missed={args.track_max_missed}, "
         f"thresholds_json={'on' if thresholds_map else 'off'}"
     )
+    display_enabled = bool(os.getenv("DISPLAY"))
+    if not display_enabled:
+        print("[Display] Headless mode: OpenCV window disabled (DISPLAY is empty)")
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
+        if frame is None:
+            continue
+        if len(frame.shape) == 2:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        elif len(frame.shape) == 3 and frame.shape[2] == 1:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        elif len(frame.shape) != 3:
+            continue
 
         h, w, _ = frame.shape
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
@@ -808,12 +895,14 @@ def main():
                     print("Invalid sequence shape:", seq.shape)
                 sequence_buffer = []
 
-        cv2.imshow("Pose + Hand Skeleton + Fall Detection", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
+        if display_enabled:
+            cv2.imshow("Pose + Hand Skeleton + Fall Detection", frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
 
     cap.release()
-    cv2.destroyAllWindows()
+    if display_enabled:
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

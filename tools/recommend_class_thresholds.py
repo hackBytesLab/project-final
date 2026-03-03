@@ -84,16 +84,39 @@ def build_outputs(roc_csv, by_class, labels=None):
     details = {}
 
     class_names = sorted(by_class.keys())
+
+    def resolve_output_name(class_name, points):
+        if not labels:
+            return class_name
+        class_id_raw = ""
+        if points:
+            class_id_raw = str(points[0].get("class_id", "")).strip()
+        if class_id_raw.isdigit():
+            idx = int(class_id_raw)
+            if 0 <= idx < len(labels):
+                return labels[idx]
+        if class_name in labels:
+            return class_name
+        return class_name
+
     if labels:
-        class_names = [name for name in labels if name in by_class] + [n for n in class_names if n not in labels]
+        def class_sort_key(name):
+            points = by_class.get(name, [])
+            class_id_raw = str(points[0].get("class_id", "")).strip() if points else ""
+            if class_id_raw.isdigit():
+                idx = int(class_id_raw)
+                return (0 if 0 <= idx < len(labels) else 1, idx)
+            return (2, name)
+        class_names = sorted(class_names, key=class_sort_key)
 
     for class_name in class_names:
         points = by_class.get(class_name, [])
         if not points:
             continue
+        output_name = resolve_output_name(class_name, points)
         best = recommend_threshold(points)
-        thresholds[class_name] = float(best["threshold"])
-        details[class_name] = {
+        thresholds[output_name] = float(best["threshold"])
+        details[output_name] = {
             "recommended_threshold": float(best["threshold"]),
             "youden_j": float(best["youden_j"]),
             "tpr": float(best["tpr"]),
