@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$ModelPath = "models/lstm_fall_model_enhanced_20260315_sample.h5"
+$ModelPath = "models/lstm_fall_model_enhanced_20260315_sample_fp16.tflite"
 $ThresholdsPath = "work_csv/compare/recommended_thresholds_20260315_enhanced.json"
 $Labels = "Fall,No_Fall,Pre-Fall,Falling"
 
