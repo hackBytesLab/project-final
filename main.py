@@ -1,7 +1,6 @@
 import argparse
 import json
 import os
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -12,7 +11,14 @@ import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-from feature_layout import build_frame_features_with_options, resolve_feature_layout
+from feature_layout import (
+    build_frame_features_with_options,
+    resolve_feature_layout,
+    enhance_sequence_features,
+    compute_num_features,
+    POSE_FEATURES_PER_PERSON,
+    ENHANCED_EXTRA_FEATURES,
+)
 
 try:
     from Iriun_Webcam import get_iriun_camera
@@ -23,50 +29,6 @@ except ImportError:
 DEFAULT_LABELS = "Fall,No_Fall,Pre-Fall,Falling"
 TIMESTEPS = 30
 SINGLE_PERSON_FEATURES = 150
-
-
-class PiCameraCapture:
-    def __init__(self, width=1280, height=720):
-        try:
-            from picamera2 import Picamera2
-        except ModuleNotFoundError as e:
-            # On Raspberry Pi, libcamera bindings are often installed via apt in
-            # /usr/lib/python3/dist-packages while app runs in venv.
-            if "libcamera" in str(e):
-                dist_pkg = "/usr/lib/python3/dist-packages"
-                if dist_pkg not in sys.path:
-                    sys.path.append(dist_pkg)
-                from picamera2 import Picamera2
-            else:
-                raise
-
-        self.picam2 = Picamera2()
-        config = self.picam2.create_preview_configuration(
-            main={"size": (int(width), int(height)), "format": "RGB888"}
-        )
-        self.picam2.configure(config)
-        self.picam2.start()
-
-    def isOpened(self):
-        return True
-
-    def read(self):
-        frame = self.picam2.capture_array()
-        if frame is None:
-            return False, None
-        if len(frame.shape) == 3 and frame.shape[2] == 3:
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        return True, frame
-
-    def release(self):
-        try:
-            self.picam2.stop()
-        except Exception:
-            pass
-        try:
-            self.picam2.close()
-        except Exception:
-            pass
 
 
 def parse_labels(raw_labels):
@@ -120,6 +82,24 @@ def select_class_with_thresholds(probs, label_names, thresholds_map):
 
     best_idx = int(np.argmax(probs))
     return best_idx, float(probs[best_idx]), False
+
+
+def smooth_probabilities(probs, history, window, method):
+    if window <= 1:
+        return probs
+    history.append(probs)
+    if len(history) > window:
+        history.pop(0)
+    if method == "mean":
+        return np.mean(history, axis=0)
+    if method == "vote":
+        votes = [int(np.argmax(p)) for p in history]
+        counts = np.bincount(votes, minlength=len(probs))
+        winner = int(np.argmax(counts))
+        out = np.zeros_like(probs)
+        out[winner] = 1.0
+        return out
+    return probs
 
 
 def parse_env_int(name, default):
@@ -218,33 +198,10 @@ def open_camera(camera_mode, source):
         return get_iriun_camera()
 
     if camera_mode == "pi":
-        try:
-            cap = PiCameraCapture(width=1280, height=720)
-            ret, _ = cap.read()
-            if ret:
-                return cap
-            cap.release()
-        except Exception:
-            pass
-        # Try Pi-friendly backends first to avoid GStreamer allocation failures.
-        backends = [
-            (cv2.CAP_V4L2, "v4l2"),
-            (cv2.CAP_ANY, "default"),
-        ]
-        for backend, _name in backends:
-            cap = cv2.VideoCapture(0, backend)
-            if not cap.isOpened():
-                cap.release()
-                continue
-            # Keep memory footprint low on Raspberry Pi camera pipelines.
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            ret, _ = cap.read()
-            if ret:
-                return cap
-            cap.release()
-        raise RuntimeError("Cannot open Pi camera at index 0")
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            raise RuntimeError("Cannot open Pi camera at index 0")
+        return cap
 
     if camera_mode == "rtsp":
         if not source:
@@ -296,15 +253,7 @@ def load_inference_model(model_path, num_threads=0):
         num_features = int(shape_signature[-1]) if int(shape_signature[-1]) > 0 else int(input_shape[-1])
         if num_features <= 0:
             raise ValueError(f"Invalid TFLite feature dimension: {shape_signature}")
-        # Dynamic sequence models are commonly exported with input shape [1, 1, F]
-        # while the shape signature keeps timestep as -1. Use runtime default window
-        # instead of hard-coding 1 timestep in that case.
-        if int(shape_signature[1]) > 0:
-            timesteps = int(shape_signature[1])
-        elif int(input_shape[1]) > 1:
-            timesteps = int(input_shape[1])
-        else:
-            timesteps = TIMESTEPS
+        timesteps = int(shape_signature[1]) if int(shape_signature[1]) > 0 else TIMESTEPS
         return {
             "backend": "tflite",
             "model": interpreter,
@@ -470,12 +419,6 @@ def match_detections_to_tracks(detections, track_centers, max_distance):
 def main():
     load_env_defaults()
 
-    # Allow alternate env names from simple push script
-    if not os.getenv("LINE_CHANNEL_ACCESS_TOKEN") and os.getenv("LINE_TOKEN"):
-        os.environ["LINE_CHANNEL_ACCESS_TOKEN"] = os.getenv("LINE_TOKEN")
-    if not os.getenv("LINE_USER_ID") and os.getenv("LINE_TO"):
-        os.environ["LINE_USER_ID"] = os.getenv("LINE_TO")
-
     parser = argparse.ArgumentParser(description="Pose+Hand fall detection runtime")
     parser.add_argument(
         "--camera",
@@ -501,12 +444,12 @@ def main():
     )
     parser.add_argument(
         "--line-token",
-        default=os.getenv("LINE_CHANNEL_ACCESS_TOKEN", os.getenv("LINE_TOKEN")),
+        default=os.getenv("LINE_CHANNEL_ACCESS_TOKEN"),
         help="LINE Messaging API channel access token. If omitted, no LINE alert is sent.",
     )
     parser.add_argument(
         "--line-user-id",
-        default=os.getenv("LINE_USER_ID", os.getenv("LINE_TO")),
+        default=os.getenv("LINE_USER_ID"),
         help="Target LINE user/group/room ID for push API. If omitted, broadcast API is used.",
     )
     parser.add_argument(
@@ -517,7 +460,7 @@ def main():
     )
     parser.add_argument(
         "--alert-classes",
-        default=os.getenv("ALERT_CLASSES", "Fall,Pre-Fall,Falling"),
+        default=os.getenv("ALERT_CLASSES", "Fall"),
         help="Comma-separated class names that should trigger LINE alerts.",
     )
     parser.add_argument(
@@ -556,10 +499,10 @@ def main():
         help="Normalize pose/hand geometry per entity before inference.",
     )
     parser.add_argument(
-        "--flip-vertical",
-        default=parse_env_bool("FLIP_VERTICAL", False),
+        "--enhance-features",
+        default=parse_env_bool("ENHANCE_FEATURES", False),
         action="store_true",
-        help="Flip incoming frames vertically before processing (e.g., upside-down camera mount).",
+        help="Use enhanced feature set (position + pose velocity + trunk angle + hip height).",
     )
     parser.add_argument(
         "--track-max-distance",
@@ -574,21 +517,21 @@ def main():
         help="Frames to keep an unmatched track before reset in per-person mode.",
     )
     parser.add_argument(
+        "--smooth-window",
+        type=int,
+        default=parse_env_int("SMOOTH_WINDOW", 3),
+        help="Smoothing window (number of sequence outputs) for classification. 1 disables smoothing.",
+    )
+    parser.add_argument(
+        "--smooth-method",
+        choices=["mean", "vote"],
+        default=os.getenv("SMOOTH_METHOD", "mean"),
+        help="Smoothing method applied to class probabilities.",
+    )
+    parser.add_argument(
         "--thresholds-json",
         default=os.getenv("THRESHOLDS_JSON", ""),
         help="Optional JSON containing per-class thresholds for inference.",
-    )
-    parser.add_argument(
-        "--display-width",
-        type=int,
-        default=parse_env_int("DISPLAY_WIDTH", 960),
-        help="Preview window width in GUI mode (0 keeps original frame width).",
-    )
-    parser.add_argument(
-        "--display-height",
-        type=int,
-        default=parse_env_int("DISPLAY_HEIGHT", 540),
-        help="Preview window height in GUI mode (0 keeps original frame height).",
     )
     args = parser.parse_args()
 
@@ -601,6 +544,20 @@ def main():
         max_people_arg=args.max_people,
         max_hands_arg=args.max_hands,
     )
+    base_features = compute_num_features(feature_max_people, feature_max_hands)
+    enhanced_expected = base_features + ENHANCED_EXTRA_FEATURES
+    if args.enhance_features:
+        if num_features != enhanced_expected:
+            raise ValueError(
+                f"Model expects {num_features} features but enhanced layout computes {enhanced_expected}. "
+                "Use matching model or disable --enhance-features."
+            )
+    else:
+        if num_features != base_features:
+            print(
+                f"[WARN] Model features ({num_features}) exceed base layout ({base_features}). "
+                "Consider enabling --enhance-features to supply matching inputs."
+            )
     detect_people = max(feature_max_people, max(1, args.detect_people))
     supports_single_person_model = (
         num_features == SINGLE_PERSON_FEATURES
@@ -623,10 +580,12 @@ def main():
         detect_hands = max(detect_hands, detect_people * 2)
 
     sequence_buffer = []
+    frame_prob_history = []
     track_centers = [None] * detect_people
     track_missed = [0] * detect_people
     track_buffers = [[] for _ in range(detect_people)]
     track_labels = [""] * detect_people
+    track_prob_history = [[] for _ in range(detect_people)]
 
     label_names = parse_labels(args.labels)
     gesture_labels = {i: name for i, name in enumerate(label_names)}
@@ -715,32 +674,11 @@ def main():
         f"track_max_distance={args.track_max_distance}, track_max_missed={args.track_max_missed}, "
         f"thresholds_json={'on' if thresholds_map else 'off'}"
     )
-    display_enabled = bool(os.getenv("DISPLAY"))
-    window_name = "Pose + Hand Skeleton + Fall Detection"
-    if not display_enabled:
-        print("[Display] Headless mode: OpenCV window disabled (DISPLAY is empty)")
-    else:
-        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-        if args.display_width > 0 and args.display_height > 0:
-            cv2.resizeWindow(window_name, args.display_width, args.display_height)
-            print(f"[Display] GUI mode window size: {args.display_width}x{args.display_height}")
-        else:
-            print("[Display] GUI mode window size: original frame size")
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        if frame is None:
-            continue
-        if args.flip_vertical:
-            frame = cv2.flip(frame, 0)
-        if len(frame.shape) == 2:
-            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-        elif len(frame.shape) == 3 and frame.shape[2] == 1:
-            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-        elif len(frame.shape) != 3:
-            continue
 
         h, w, _ = frame.shape
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
@@ -806,6 +744,7 @@ def main():
                         track_centers[track_idx] = None
                         track_buffers[track_idx] = []
                         track_labels[track_idx] = ""
+                        track_prob_history[track_idx] = []
                         track_missed[track_idx] = 0
                     continue
 
@@ -824,10 +763,15 @@ def main():
 
                 if len(track_buffers[track_idx]) == model_timesteps:
                     seq = np.array(track_buffers[track_idx], dtype=np.float32)
+                    if args.enhance_features:
+                        seq = enhance_sequence_features(seq)
                     if seq.shape[1] == num_features:
                         probs = predict_sequence_with_score(model_info, seq)
+                        smoothed_probs = smooth_probabilities(
+                            probs, track_prob_history[track_idx], args.smooth_window, args.smooth_method
+                        )
                         gesture_id, gesture_score, used_threshold = select_class_with_thresholds(
-                            probs, label_names, thresholds_map
+                            smoothed_probs, label_names, thresholds_map
                         )
                         gesture_name = gesture_labels.get(gesture_id, str(gesture_id))
                         track_labels[track_idx] = f"{gesture_name} {gesture_score:.2f}"
@@ -888,10 +832,15 @@ def main():
 
             if len(sequence_buffer) == model_timesteps:
                 seq = np.array(sequence_buffer)
+                if args.enhance_features:
+                    seq = enhance_sequence_features(seq)
                 if seq.shape[1] == num_features:
                     probs = predict_sequence_with_score(model_info, seq)
+                    smoothed_probs = smooth_probabilities(
+                        probs, frame_prob_history, args.smooth_window, args.smooth_method
+                    )
                     gesture_id, _, used_threshold = select_class_with_thresholds(
-                        probs, label_names, thresholds_map
+                        smoothed_probs, label_names, thresholds_map
                     )
                     gesture_name = gesture_labels.get(gesture_id, str(gesture_id))
                     if used_threshold:
@@ -929,14 +878,12 @@ def main():
                     print("Invalid sequence shape:", seq.shape)
                 sequence_buffer = []
 
-        if display_enabled:
-            cv2.imshow(window_name, frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+        cv2.imshow("Pose + Hand Skeleton + Fall Detection", frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
 
     cap.release()
-    if display_enabled:
-        cv2.destroyAllWindows()
+    cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

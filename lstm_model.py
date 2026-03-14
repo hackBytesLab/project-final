@@ -1,5 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras import layers, models
+from tensorflow.keras.layers import BatchNormalization, Dropout
 
 
 def categorical_focal_loss(gamma=2.0, alpha=0.25):
@@ -44,15 +45,23 @@ def build_lstm_model(
     loss_name="categorical_crossentropy",
     focal_gamma=2.0,
     focal_alpha=0.25,
+    dropout_rate=0.3,
+    use_batchnorm=True,
 ):
-    model = models.Sequential(
-        [
-            layers.LSTM(128, return_sequences=True, input_shape=(None, num_features)),
-            layers.LSTM(64),
-            layers.Dense(64, activation="relu"),
-            layers.Dense(num_classes, activation="softmax"),
-        ]
-    )
+    layers_list = [
+        layers.LSTM(128, return_sequences=True, input_shape=(None, num_features)),
+    ]
+    if use_batchnorm:
+        layers_list.append(BatchNormalization())
+    layers_list.append(Dropout(dropout_rate))
+    layers_list.append(layers.LSTM(64, return_sequences=False))
+    if use_batchnorm:
+        layers_list.append(BatchNormalization())
+    layers_list.append(Dropout(dropout_rate))
+    layers_list.append(layers.Dense(64, activation="relu"))
+    layers_list.append(layers.Dense(num_classes, activation="softmax"))
+
+    model = models.Sequential(layers_list)
     model.compile(
         optimizer="adam",
         loss=resolve_loss(

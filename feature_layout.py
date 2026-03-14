@@ -5,6 +5,7 @@ COORD_DIMS = 2
 POSE_FEATURES_PER_PERSON = POSE_LANDMARK_COUNT * COORD_DIMS
 HAND_FEATURES_PER_HAND = HAND_LANDMARK_COUNT * COORD_DIMS
 FEATURES_PER_PERSON = POSE_FEATURES_PER_PERSON + (2 * HAND_FEATURES_PER_HAND)
+ENHANCED_EXTRA_FEATURES = POSE_FEATURES_PER_PERSON + 2  # pose velocity (x,y) + trunk angle + hip height
 
 
 def compute_num_features(max_people, max_hands=None):
@@ -26,6 +27,10 @@ def infer_people_from_num_features(num_features):
 
 
 def resolve_feature_layout(num_features, max_people_arg=0, max_hands_arg=0):
+    """
+    Returns (max_people, max_hands) while allowing enhanced feature vectors
+    that include pose velocity + trunk angle + hip height (i.e., base + ENHANCED_EXTRA_FEATURES).
+    """
     inferred_people = infer_people_from_num_features(num_features)
     if max_people_arg > 0:
         max_people = max_people_arg
@@ -37,11 +42,13 @@ def resolve_feature_layout(num_features, max_people_arg=0, max_hands_arg=0):
     max_hands = max_hands_arg if max_hands_arg > 0 else max_people * 2
     expected_features = compute_num_features(max_people, max_hands)
     if expected_features != num_features:
-        raise ValueError(
-            "Model input features do not match requested layout: "
-            f"model={num_features}, expected={expected_features}, "
-            f"max_people={max_people}, max_hands={max_hands}"
-        )
+        enhanced_expected = expected_features + ENHANCED_EXTRA_FEATURES
+        if num_features != enhanced_expected:
+            raise ValueError(
+                "Model input features do not match requested layout: "
+                f"model={num_features}, expected={expected_features} or enhanced={enhanced_expected}, "
+                f"max_people={max_people}, max_hands={max_hands}"
+            )
     return max_people, max_hands
 
 
@@ -113,3 +120,46 @@ def build_frame_features_with_options(
             features.extend([0.0] * HAND_FEATURES_PER_HAND)
 
     return features
+
+
+def enhance_sequence_features(sequence):
+    """
+    Add temporal/dynamic features to a sequence of per-frame features.
+    Input: sequence (T, F) where F includes pose+hands 2D coords (default 150).
+    Output: (T, F + pose_velocity(66) + trunk_angle(1) + hip_height(1)) => 218 when F=150.
+    """
+    import numpy as np
+
+    seq = np.asarray(sequence, dtype=np.float32)
+    if seq.ndim != 2 or seq.shape[1] < POSE_FEATURES_PER_PERSON:
+        raise ValueError("Expected sequence of shape (timesteps, features>=pose features)")
+
+    T, F = seq.shape
+    velocity = np.zeros_like(seq)
+    if T > 1:
+        velocity[1:] = seq[1:] - seq[:-1]
+
+    pose_velocity = velocity[:, :POSE_FEATURES_PER_PERSON]
+
+    def get_point(frame, landmark_idx):
+        idx = landmark_idx * 2
+        return float(frame[idx]), float(frame[idx + 1])
+
+    angles = np.zeros((T, 1), dtype=np.float32)
+    hip_heights = np.zeros((T, 1), dtype=np.float32)
+    for i in range(T):
+        lsx, lsy = get_point(seq[i], 11)
+        rsx, rsy = get_point(seq[i], 12)
+        lhx, lhy = get_point(seq[i], 23)
+        rhx, rhy = get_point(seq[i], 24)
+
+        mid_sx, mid_sy = (lsx + rsx) / 2.0, (lsy + rsy) / 2.0
+        mid_hx, mid_hy = (lhx + rhx) / 2.0, (lhy + rhy) / 2.0
+
+        dx = mid_hx - mid_sx
+        dy = mid_hy - mid_sy
+        angles[i, 0] = np.degrees(np.arctan2(dx, dy + 1e-6))
+        hip_heights[i, 0] = mid_hy
+
+    enhanced = np.concatenate([seq, pose_velocity, angles, hip_heights], axis=1)
+    return enhanced

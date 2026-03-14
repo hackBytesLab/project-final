@@ -27,6 +27,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.utils import to_categorical
 
 from lstm_model import build_lstm_model
+from feature_layout import enhance_sequence_features, POSE_FEATURES_PER_PERSON, ENHANCED_EXTRA_FEATURES
 
 
 def generate_sample(
@@ -891,6 +892,11 @@ def main():
     )
     parser.add_argument("--labels", default="", help="Optional comma-separated labels in class-id order")
     parser.add_argument(
+        "--enhance-features",
+        action="store_true",
+        help="Add velocity + trunk angle + hip height features (expands input to 218 dims for single-person layout).",
+    )
+    parser.add_argument(
         "--validation-mode",
         choices=["split", "kfold", "holdout-kfold"],
         default="holdout-kfold",
@@ -977,6 +983,10 @@ def main():
     if np.min(y) < 0:
         raise ValueError("y must contain non-negative class ids")
 
+    if args.enhance_features:
+        X = np.stack([enhance_sequence_features(seq) for seq in X], axis=0)
+        print(f"[INFO] Enhanced features enabled -> new shape {X.shape}")
+
     classes = int(np.max(y)) + 1
     label_names = resolve_label_names(args.data_dir, args.labels, classes)
     _, _, num_features = X.shape
@@ -1007,6 +1017,7 @@ def main():
         "augment_mode": args.augment_mode,
         "augment_factor": float(args.augment_factor),
         "loss_function": args.loss_function,
+        "enhance_features": bool(args.enhance_features),
         "focal_alpha_mode": args.focal_alpha_mode,
         "focal_alpha_cap": float(args.focal_alpha_cap),
         "focal_gamma": float(args.focal_gamma),
