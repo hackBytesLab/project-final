@@ -493,6 +493,29 @@ def build_sample_weights(y, class_weights):
     return np.array([class_weights.get(int(cls), 1.0) for cls in y], dtype=np.float32)
 
 
+def parse_class_weight_override(raw, classes):
+    """
+    Parse manual class weights string "0:1,1:0.5,2:2,3:8".
+    Returns dict[int, float]; ignores malformed entries; clamps to class count.
+    """
+    weights = {}
+    if not raw:
+        return weights
+    for part in raw.split(","):
+        if ":" not in part:
+            continue
+        k, v = part.split(":", 1)
+        try:
+            idx = int(k.strip())
+            val = float(v.strip())
+        except ValueError:
+            continue
+        if idx < 0 or idx >= classes:
+            continue
+        weights[idx] = val
+    return weights
+
+
 def oversample_training_data(X, y, classes, random_state):
     rng = np.random.default_rng(random_state)
     counts = np.bincount(y, minlength=classes).astype(np.int64)
@@ -658,6 +681,8 @@ def train_single_run(X_train, y_train, X_val, y_val, num_features, classes, args
         loss_name=args.loss_function,
         focal_gamma=args.focal_gamma,
         focal_alpha=focal_alpha_value,
+        dropout_rate=args.dropout_rate,
+        use_batchnorm=not args.no_batchnorm,
     )
     callbacks = [
         EarlyStopping(monitor="val_loss", patience=args.patience, restore_best_weights=True),
@@ -681,10 +706,16 @@ def train_single_run(X_train, y_train, X_val, y_val, num_features, classes, args
     )
     balance_info.update(aug_info)
 
-    if args.balance_mode == "class_weight":
+    override_weights = parse_class_weight_override(args.class_weight_override, classes)
+    if override_weights:
+        sample_weight = build_sample_weights(train_y, override_weights)
+        balance_info["class_weights"] = {str(k): float(v) for k, v in override_weights.items()}
+        balance_info["class_weight_mode"] = "override"
+    elif args.balance_mode == "class_weight":
         class_weights = compute_balanced_class_weights(train_y, classes)
         sample_weight = build_sample_weights(train_y, class_weights)
         balance_info["class_weights"] = {str(k): float(v) for k, v in class_weights.items()}
+        balance_info["class_weight_mode"] = "balanced"
 
     history = model.fit(
         train_X,
@@ -878,6 +909,10 @@ def main():
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--patience", type=int, default=5, help="Early stopping patience")
+    parser.add_argument("--dropout-rate", type=float, default=0.3, help="Dropout rate for LSTM stack")
+    parser.add_argument(
+        "--no-batchnorm", action="store_true", help="Disable batch normalization layers in the LSTM stack"
+    )
     parser.add_argument("--out", default="models/lstm_fall_model.h5", help="Output model path")
     parser.add_argument(
         "--eval-dir",
@@ -911,6 +946,11 @@ def main():
         choices=["none", "class_weight", "oversample"],
         default="none",
         help="Imbalance handling for training folds/final model",
+    )
+    parser.add_argument(
+        "--class-weight-override",
+        default="",
+        help="Optional manual class weights, e.g. '0:1,1:0.5,2:2,3:8'. If set, overrides computed class weights.",
     )
     parser.add_argument(
         "--augment-mode",
@@ -1022,6 +1062,8 @@ def main():
         "focal_alpha_cap": float(args.focal_alpha_cap),
         "focal_gamma": float(args.focal_gamma),
         "focal_alpha": float(args.focal_alpha),
+        "dropout_rate": float(args.dropout_rate),
+        "use_batchnorm": bool(not args.no_batchnorm),
         "num_folds": int(args.num_folds),
         "test_size": float(args.test_size),
         "total_samples": int(len(y)),
