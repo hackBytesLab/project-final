@@ -8,7 +8,13 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from tensorflow.keras.models import load_model
 
-from feature_layout import build_frame_features_with_options, resolve_feature_layout
+from feature_layout import (
+    build_frame_features_with_options,
+    resolve_feature_layout,
+    enhance_sequence_features,
+    compute_num_features,
+    ENHANCED_EXTRA_FEATURES,
+)
 
 POSE_MODEL_PATH = 'models/pose_landmarker_lite.task'
 HAND_MODEL_PATH = 'models/hand_landmarker.task'
@@ -60,6 +66,7 @@ def infer_on_video(
     max_people_arg=0,
     max_hands_arg=0,
     normalize_geometry=False,
+    enhance_features=False,
 ):
     if not os.path.exists(model_path):
         raise FileNotFoundError('Model file not found: ' + model_path)
@@ -76,6 +83,20 @@ def infer_on_video(
         max_people_arg=max_people_arg,
         max_hands_arg=max_hands_arg,
     )
+    base_features = compute_num_features(max_people, max_hands)
+    enhanced_expected = base_features + ENHANCED_EXTRA_FEATURES
+    if enhance_features:
+        if num_features != enhanced_expected:
+            raise ValueError(
+                f"Model features {num_features} do not match enhanced layout {enhanced_expected}. "
+                "Use matching model or disable --enhance-features."
+            )
+    else:
+        if num_features != base_features:
+            print(
+                f"[WARN] Model features ({num_features}) exceed base layout ({base_features}). "
+                "Consider enabling --enhance-features."
+            )
     pose_detector, hand_detector = create_detectors(max_people=max_people, max_hands=max_hands)
 
     cap = cv2.VideoCapture(video_path)
@@ -124,6 +145,8 @@ def infer_on_video(
         return
 
     X = np.array(windows, dtype=np.float32)
+    if enhance_features:
+        X = np.stack([enhance_sequence_features(seq) for seq in X], axis=0)
     print('Prepared', X.shape[0], 'windows, running inference...')
 
     preds = []
@@ -237,6 +260,11 @@ if __name__ == '__main__':
         action='store_true',
         help='Normalize pose/hand geometry per entity (use same setting as training).',
     )
+    parser.add_argument(
+        '--enhance-features',
+        action='store_true',
+        help='Add velocity + trunk angle + hip height features before inference.',
+    )
 
     args = parser.parse_args()
 
@@ -257,4 +285,5 @@ if __name__ == '__main__':
         max_people_arg=args.max_people,
         max_hands_arg=args.max_hands,
         normalize_geometry=args.normalize_geometry,
+        enhance_features=args.enhance_features,
     )

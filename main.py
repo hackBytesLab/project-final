@@ -11,7 +11,14 @@ import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-from feature_layout import build_frame_features_with_options, resolve_feature_layout
+from feature_layout import (
+    build_frame_features_with_options,
+    resolve_feature_layout,
+    enhance_sequence_features,
+    compute_num_features,
+    POSE_FEATURES_PER_PERSON,
+    ENHANCED_EXTRA_FEATURES,
+)
 
 try:
     from Iriun_Webcam import get_iriun_camera
@@ -75,6 +82,24 @@ def select_class_with_thresholds(probs, label_names, thresholds_map):
 
     best_idx = int(np.argmax(probs))
     return best_idx, float(probs[best_idx]), False
+
+
+def smooth_probabilities(probs, history, window, method):
+    if window <= 1:
+        return probs
+    history.append(probs)
+    if len(history) > window:
+        history.pop(0)
+    if method == "mean":
+        return np.mean(history, axis=0)
+    if method == "vote":
+        votes = [int(np.argmax(p)) for p in history]
+        counts = np.bincount(votes, minlength=len(probs))
+        winner = int(np.argmax(counts))
+        out = np.zeros_like(probs)
+        out[winner] = 1.0
+        return out
+    return probs
 
 
 def parse_env_int(name, default):
@@ -474,6 +499,12 @@ def main():
         help="Normalize pose/hand geometry per entity before inference.",
     )
     parser.add_argument(
+        "--enhance-features",
+        default=parse_env_bool("ENHANCE_FEATURES", False),
+        action="store_true",
+        help="Use enhanced feature set (position + pose velocity + trunk angle + hip height).",
+    )
+    parser.add_argument(
         "--track-max-distance",
         type=float,
         default=parse_env_float("TRACK_MAX_DISTANCE", 0.20),
@@ -484,6 +515,18 @@ def main():
         type=int,
         default=parse_env_int("TRACK_MAX_MISSED", 15),
         help="Frames to keep an unmatched track before reset in per-person mode.",
+    )
+    parser.add_argument(
+        "--smooth-window",
+        type=int,
+        default=parse_env_int("SMOOTH_WINDOW", 3),
+        help="Smoothing window (number of sequence outputs) for classification. 1 disables smoothing.",
+    )
+    parser.add_argument(
+        "--smooth-method",
+        choices=["mean", "vote"],
+        default=os.getenv("SMOOTH_METHOD", "mean"),
+        help="Smoothing method applied to class probabilities.",
     )
     parser.add_argument(
         "--thresholds-json",
@@ -501,6 +544,20 @@ def main():
         max_people_arg=args.max_people,
         max_hands_arg=args.max_hands,
     )
+    base_features = compute_num_features(feature_max_people, feature_max_hands)
+    enhanced_expected = base_features + ENHANCED_EXTRA_FEATURES
+    if args.enhance_features:
+        if num_features != enhanced_expected:
+            raise ValueError(
+                f"Model expects {num_features} features but enhanced layout computes {enhanced_expected}. "
+                "Use matching model or disable --enhance-features."
+            )
+    else:
+        if num_features != base_features:
+            print(
+                f"[WARN] Model features ({num_features}) exceed base layout ({base_features}). "
+                "Consider enabling --enhance-features to supply matching inputs."
+            )
     detect_people = max(feature_max_people, max(1, args.detect_people))
     supports_single_person_model = (
         num_features == SINGLE_PERSON_FEATURES
@@ -523,10 +580,12 @@ def main():
         detect_hands = max(detect_hands, detect_people * 2)
 
     sequence_buffer = []
+    frame_prob_history = []
     track_centers = [None] * detect_people
     track_missed = [0] * detect_people
     track_buffers = [[] for _ in range(detect_people)]
     track_labels = [""] * detect_people
+    track_prob_history = [[] for _ in range(detect_people)]
 
     label_names = parse_labels(args.labels)
     gesture_labels = {i: name for i, name in enumerate(label_names)}
@@ -685,6 +744,7 @@ def main():
                         track_centers[track_idx] = None
                         track_buffers[track_idx] = []
                         track_labels[track_idx] = ""
+                        track_prob_history[track_idx] = []
                         track_missed[track_idx] = 0
                     continue
 
@@ -703,10 +763,15 @@ def main():
 
                 if len(track_buffers[track_idx]) == model_timesteps:
                     seq = np.array(track_buffers[track_idx], dtype=np.float32)
+                    if args.enhance_features:
+                        seq = enhance_sequence_features(seq)
                     if seq.shape[1] == num_features:
                         probs = predict_sequence_with_score(model_info, seq)
+                        smoothed_probs = smooth_probabilities(
+                            probs, track_prob_history[track_idx], args.smooth_window, args.smooth_method
+                        )
                         gesture_id, gesture_score, used_threshold = select_class_with_thresholds(
-                            probs, label_names, thresholds_map
+                            smoothed_probs, label_names, thresholds_map
                         )
                         gesture_name = gesture_labels.get(gesture_id, str(gesture_id))
                         track_labels[track_idx] = f"{gesture_name} {gesture_score:.2f}"
@@ -767,10 +832,15 @@ def main():
 
             if len(sequence_buffer) == model_timesteps:
                 seq = np.array(sequence_buffer)
+                if args.enhance_features:
+                    seq = enhance_sequence_features(seq)
                 if seq.shape[1] == num_features:
                     probs = predict_sequence_with_score(model_info, seq)
+                    smoothed_probs = smooth_probabilities(
+                        probs, frame_prob_history, args.smooth_window, args.smooth_method
+                    )
                     gesture_id, _, used_threshold = select_class_with_thresholds(
-                        probs, label_names, thresholds_map
+                        smoothed_probs, label_names, thresholds_map
                     )
                     gesture_name = gesture_labels.get(gesture_id, str(gesture_id))
                     if used_threshold:
