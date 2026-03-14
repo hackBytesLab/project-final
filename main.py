@@ -560,7 +560,7 @@ def main():
             )
     detect_people = max(feature_max_people, max(1, args.detect_people))
     supports_single_person_model = (
-        num_features == SINGLE_PERSON_FEATURES
+        num_features in (SINGLE_PERSON_FEATURES, SINGLE_PERSON_FEATURES + ENHANCED_EXTRA_FEATURES)
         and feature_max_people == 1
         and feature_max_hands == 2
     )

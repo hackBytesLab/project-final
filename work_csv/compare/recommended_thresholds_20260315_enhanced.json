@@ -1,0 +1,9 @@
+{
+  "thresholds": {
+    "Fall": 0.678214,
+    "No_Fall": 0.2589589,
+    "Pre-Fall": 0.99834764,
+    "Falling": 0.695283
+  },
+  "notes": "Derived from holdout ROC of eval_enhanced_20260315_sample (sample-level split, enhanced features). Thresholds maximize per-class F1 (computed from TPR/FPR and class supports)."
+}
