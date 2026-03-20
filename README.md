@@ -1,6 +1,12 @@
 # Fall Detection - Project Final
 
-โปรเจกต์นี้ใช้ MediaPipe (Pose + Hand) + LSTM เพื่อแยกคลาสการเคลื่อนไหว:
+### Feature layout / flags (important)
+- Base input = 150 dims (33 pose + 21x2 hands, x/y)
+- --enhance-features appends pose velocity (66 values) -> 216 dims; enable this when you want Pre-Fall vs Falling override to work.
+- Default label order (examples): Fall=0, No_Fall=1, Pre-Fall=2, Falling=3
+- Safety logic: rule-based FALL/PRE_FALL overrides LSTM; with --enhance-features velocity spikes further split Pre-Fall vs Falling.
+
+Classes:
 - `Fall`
 - `No_Fall`
 - `Pre-Fall`

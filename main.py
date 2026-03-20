@@ -19,6 +19,7 @@ from feature_layout import (
     POSE_FEATURES_PER_PERSON,
     ENHANCED_EXTRA_FEATURES,
 )
+from rule_fusion import fuse_rule_with_lstm, separate_prefall_falling, DEFAULT_THRESHOLDS
 
 try:
     from Iriun_Webcam import get_iriun_camera
@@ -770,17 +771,23 @@ def main():
                         smoothed_probs = smooth_probabilities(
                             probs, track_prob_history[track_idx], args.smooth_window, args.smooth_method
                         )
-                        gesture_id, gesture_score, used_threshold = select_class_with_thresholds(
+                        sel_id, _, used_threshold = select_class_with_thresholds(
                             smoothed_probs, label_names, thresholds_map
                         )
-                        gesture_name = gesture_labels.get(gesture_id, str(gesture_id))
+                        fused_id, fused_name, used_rule = fuse_rule_with_lstm(
+                            smoothed_probs, label_names, seq, thresholds=DEFAULT_THRESHOLDS
+                        )
+                        override_id = None
+                        if args.enhance_features and fused_name.lower() in ("pre-fall", "pre_fall", "falling"):
+                            override_id = separate_prefall_falling(seq, label_names)
+                        gesture_id = override_id if override_id is not None else fused_id
+                        gesture_name = label_names[gesture_id] if gesture_id < len(label_names) else str(gesture_id)
+                        gesture_score = float(smoothed_probs[gesture_id])
                         track_labels[track_idx] = f"{gesture_name} {gesture_score:.2f}"
-                        if used_threshold:
-                            print(
-                                f"Condition[P{track_idx + 1}]: {gesture_name} ({gesture_score:.2f}) [threshold]"
-                            )
-                        else:
-                            print(f"Condition[P{track_idx + 1}]: {gesture_name} ({gesture_score:.2f})")
+                        tag = "[rule]" if used_rule else ("[threshold]" if used_threshold else "")
+                        if override_id is not None:
+                            tag = "[prefall/falling override]"
+                        print(f"Condition[P{track_idx + 1}]: {gesture_name} ({gesture_score:.2f}) {tag}".strip())
 
                         if args.line_token and gesture_name in alert_classes:
                             now = time.time()
@@ -839,14 +846,22 @@ def main():
                     smoothed_probs = smooth_probabilities(
                         probs, frame_prob_history, args.smooth_window, args.smooth_method
                     )
-                    gesture_id, _, used_threshold = select_class_with_thresholds(
+                    sel_id, _, used_threshold = select_class_with_thresholds(
                         smoothed_probs, label_names, thresholds_map
                     )
-                    gesture_name = gesture_labels.get(gesture_id, str(gesture_id))
-                    if used_threshold:
-                        print("Condition:", gesture_name, "[threshold]")
-                    else:
-                        print("Condition:", gesture_name)
+                    fused_id, fused_name, used_rule = fuse_rule_with_lstm(
+                        smoothed_probs, label_names, seq, thresholds=DEFAULT_THRESHOLDS
+                    )
+                    override_id = None
+                    if args.enhance_features and fused_name.lower() in ("pre-fall", "pre_fall", "falling"):
+                        override_id = separate_prefall_falling(seq, label_names)
+                    gesture_id = override_id if override_id is not None else fused_id
+                    gesture_name = label_names[gesture_id] if gesture_id < len(label_names) else str(gesture_id)
+                    gesture_score = float(smoothed_probs[gesture_id])
+                    tag = "[rule]" if used_rule else ("[threshold]" if used_threshold else "")
+                    if override_id is not None:
+                        tag = "[prefall/falling override]"
+                    print(f"Condition: {gesture_name} ({gesture_score:.2f}) {tag}".strip())
 
                     if args.line_token and gesture_name in alert_classes:
                         now = time.time()

@@ -929,7 +929,7 @@ def main():
     parser.add_argument(
         "--enhance-features",
         action="store_true",
-        help="Add velocity + trunk angle + hip height features (expands input to 218 dims for single-person layout).",
+        help="Add pose velocity (66 coords diff) -> 216 dims for single-person layout.",
     )
     parser.add_argument(
         "--validation-mode",
