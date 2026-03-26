@@ -298,10 +298,22 @@ def open_camera(camera_mode, source):
         try:
             return PiCamera2Capture()
         except Exception:
-            cap = cv2.VideoCapture(0)
-            if not cap.isOpened():
-                raise RuntimeError("Cannot open Pi camera via picamera2 or camera index 0")
+            pass
+
+        gst_pipeline = (
+            "libcamerasrc ! video/x-raw,width=640,height=480,framerate=30/1 "
+            "! videoconvert ! video/x-raw,format=BGR ! appsink drop=true sync=false"
+        )
+        cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
+        if cap.isOpened():
             return cap
+
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            raise RuntimeError(
+                "Cannot open Pi camera via picamera2, GStreamer pipeline, or camera index 0"
+            )
+        return cap
 
     if camera_mode == "rtsp":
         if not source:

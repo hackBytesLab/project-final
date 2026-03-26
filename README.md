@@ -147,6 +147,14 @@ python tools/verify_class_order.py --manifest refs/refs_manifest.csv --model mod
 python infer_video.py --video data_long/long_train.mp4 --model models/lstm_fall_model.h5 --out-csv work_csv/segments_named.csv --timesteps 30 --step 1 --batch-size 64 --labels Fall,No_Fall,Pre-Fall,Falling --out-video work_csv/labeled_preview_named.mp4
 ```
 
+ถ้าต้องการ export รูปตัวอย่างตอน test/infer แยกตามทั้ง 4 คลาส:
+
+```bash
+python infer_video.py --video data_long/long_train.mp4 --model models/lstm_fall_model.h5 --out-csv work_csv/segments_named.csv --timesteps 30 --step 1 --batch-size 64 --labels Fall,No_Fall,Pre-Fall,Falling --out-video work_csv/labeled_preview_named.mp4 --save-class-frames-dir work_csv/test_class_frames --max-frames-per-class 10
+```
+
+ผลลัพธ์จะถูกบันทึกเป็นโฟลเดอร์แยกคลาส เช่น `00_Fall/`, `01_No_Fall/`, `02_Pre-Fall/`, `03_Falling/` พร้อมไฟล์ `saved_frames.csv`
+
 ### 6.4 Filter ตามความมั่นใจ
 
 ```bash

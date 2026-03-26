@@ -22,6 +22,123 @@ POSE_MODEL_PATH = 'models/pose_landmarker_lite.task'
 HAND_MODEL_PATH = 'models/hand_landmarker.task'
 
 
+def get_class_name(class_id, labels_map=None):
+    if labels_map and class_id in labels_map:
+        return labels_map[class_id]
+    return str(class_id)
+
+
+def sanitize_path_component(value):
+    safe = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in str(value).strip())
+    return safe or 'unknown'
+
+
+def select_frame_indices(indices, limit):
+    if limit <= 0 or len(indices) <= limit:
+        return list(indices)
+    picks = np.linspace(0, len(indices) - 1, num=limit, dtype=int)
+    selected = []
+    seen = set()
+    for idx in picks:
+        frame_idx = indices[int(idx)]
+        if frame_idx in seen:
+            continue
+        seen.add(frame_idx)
+        selected.append(frame_idx)
+    return selected
+
+
+def export_class_frames(
+    video_path,
+    frame_labels,
+    frame_scores,
+    fps,
+    out_dir,
+    labels_map=None,
+    max_frames_per_class=5,
+):
+    os.makedirs(out_dir, exist_ok=True)
+
+    if labels_map:
+        target_class_ids = sorted(labels_map.keys())
+    else:
+        target_class_ids = sorted(set(int(lbl) for lbl in frame_labels))
+
+    selected_by_class = {}
+    missing_classes = []
+    for class_id in target_class_ids:
+        direct_indices = [
+            idx for idx, (label, score) in enumerate(zip(frame_labels, frame_scores))
+            if int(label) == class_id and float(score) > 0.0
+        ]
+        fallback_indices = [idx for idx, label in enumerate(frame_labels) if int(label) == class_id]
+        chosen_indices = direct_indices or fallback_indices
+        selected = select_frame_indices(chosen_indices, max_frames_per_class)
+        selected_by_class[class_id] = set(selected)
+        if not selected:
+            missing_classes.append(get_class_name(class_id, labels_map))
+
+    manifest_path = os.path.join(out_dir, 'saved_frames.csv')
+    with open(manifest_path, 'w', newline='', encoding='utf-8') as manifest_file:
+        writer = csv.writer(manifest_file)
+        writer.writerow(['class_id', 'class_name', 'frame_index', 'time_s', 'score', 'image_path'])
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise RuntimeError('Cannot open video for frame export: ' + video_path)
+
+        frame_idx = 0
+        saved_count = 0
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+
+            class_id = int(frame_labels[frame_idx]) if frame_idx < len(frame_labels) else None
+            if class_id is not None and frame_idx in selected_by_class.get(class_id, set()):
+                class_name = get_class_name(class_id, labels_map)
+                class_dir = os.path.join(
+                    out_dir,
+                    f"{class_id:02d}_{sanitize_path_component(class_name)}",
+                )
+                os.makedirs(class_dir, exist_ok=True)
+
+                score = float(frame_scores[frame_idx]) if frame_idx < len(frame_scores) else 0.0
+                overlay = frame.copy()
+                text = f"{class_name} | score={score:.2f} | frame={frame_idx}"
+                cv2.putText(
+                    overlay,
+                    text,
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    (0, 0, 255),
+                    2,
+                )
+
+                image_name = f"frame_{frame_idx:06d}_score_{score:.2f}.jpg"
+                image_path = os.path.join(class_dir, image_name)
+                cv2.imwrite(image_path, overlay)
+                writer.writerow([
+                    class_id,
+                    class_name,
+                    frame_idx,
+                    frame_idx / fps if fps else 0.0,
+                    score,
+                    image_path,
+                ])
+                saved_count += 1
+
+            frame_idx += 1
+
+        cap.release()
+
+    print('Saved class frames manifest to', manifest_path)
+    if missing_classes:
+        print('[WARN] No frames available for classes:', ', '.join(missing_classes))
+    print('Saved', saved_count, 'representative frames to', out_dir)
+
+
 def create_detectors(max_people=1, max_hands=2):
     pose_base = python.BaseOptions(model_asset_path=POSE_MODEL_PATH)
     pose_options = vision.PoseLandmarkerOptions(
@@ -69,6 +186,8 @@ def infer_on_video(
     max_hands_arg=0,
     normalize_geometry=False,
     enhance_features=False,
+    save_class_frames_dir=None,
+    max_frames_per_class=5,
 ):
     if not os.path.exists(model_path):
         raise FileNotFoundError('Model file not found: ' + model_path)
@@ -220,6 +339,18 @@ def infer_on_video(
 
     print('Saved segments to', out_csv)
 
+    if save_class_frames_dir:
+        print('Exporting representative class frames ->', save_class_frames_dir)
+        export_class_frames(
+            video_path,
+            frame_labels,
+            frame_scores,
+            fps,
+            save_class_frames_dir,
+            labels_map=labels_map,
+            max_frames_per_class=max_frames_per_class,
+        )
+
     # Optionally write visualization video with overlay labels
     if out_video:
         print('Rendering labeled video ->', out_video)
@@ -263,6 +394,16 @@ if __name__ == '__main__':
     parser.add_argument('--labels', help='Optional comma-separated class names in order (e.g. Fall,No_Fall,Pre-Fall,Falling)')
     parser.add_argument('--out-video', help='Optional path to save visualization video')
     parser.add_argument(
+        '--save-class-frames-dir',
+        help='Optional directory to save representative frames grouped by predicted class.',
+    )
+    parser.add_argument(
+        '--max-frames-per-class',
+        type=int,
+        default=5,
+        help='Maximum representative frames to save per class when using --save-class-frames-dir.',
+    )
+    parser.add_argument(
         '--max-people',
         type=int,
         default=0,
@@ -305,4 +446,6 @@ if __name__ == '__main__':
         max_hands_arg=args.max_hands,
         normalize_geometry=args.normalize_geometry,
         enhance_features=args.enhance_features,
+        save_class_frames_dir=args.save_class_frames_dir,
+        max_frames_per_class=args.max_frames_per_class,
     )
