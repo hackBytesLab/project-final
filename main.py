@@ -251,28 +251,27 @@ def send_line_alert(channel_access_token, message, to_user_id=None, timeout=10):
 
 
 class PiCamera2Capture:
-    def __init__(self, size=(1280, 720)):
+    def __init__(self, size=(640, 480)):
         try:
             from picamera2 import Picamera2
         except ImportError as e:
             raise RuntimeError("picamera2 is not installed") from e
 
+        self._size = tuple(size)
         self._camera = Picamera2()
         config = self._camera.create_preview_configuration(
-            main={"format": "RGB888", "size": tuple(size)}
+            main={"size": self._size, "format": "BGR888"}
         )
         self._camera.configure(config)
         self._camera.start()
-        time.sleep(0.5)
 
     def isOpened(self):
         return True
 
     def read(self):
         try:
-            frame_rgb = self._camera.capture_array()
-            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-            return True, frame_bgr
+            frame = self._camera.capture_array()
+            return True, frame
         except Exception:
             return False, None
 
@@ -281,6 +280,13 @@ class PiCamera2Capture:
             self._camera.stop()
         except Exception:
             pass
+
+    def get(self, prop):
+        if prop == cv2.CAP_PROP_FRAME_WIDTH:
+            return self._size[0]
+        if prop == cv2.CAP_PROP_FRAME_HEIGHT:
+            return self._size[1]
+        return 0
 
 
 def open_camera(camera_mode, source):
@@ -297,23 +303,8 @@ def open_camera(camera_mode, source):
     if camera_mode == "pi":
         try:
             return PiCamera2Capture()
-        except Exception:
-            pass
-
-        gst_pipeline = (
-            "libcamerasrc ! video/x-raw,width=640,height=480,framerate=30/1 "
-            "! videoconvert ! video/x-raw,format=BGR ! appsink drop=true sync=false"
-        )
-        cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
-        if cap.isOpened():
-            return cap
-
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            raise RuntimeError(
-                "Cannot open Pi camera via picamera2, GStreamer pipeline, or camera index 0"
-            )
-        return cap
+        except Exception as e:
+            raise RuntimeError("Cannot open Pi camera via picamera2") from e
 
     if camera_mode == "rtsp":
         if not source:
