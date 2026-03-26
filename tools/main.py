@@ -1,6 +1,8 @@
 import argparse
+from contextlib import contextmanager
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -30,6 +32,26 @@ except ImportError:
 DEFAULT_LABELS = "Fall,No_Fall,Pre-Fall,Falling"
 TIMESTEPS = 30
 SINGLE_PERSON_FEATURES = 150
+
+
+@contextmanager
+def silence_native_stderr():
+    try:
+        stderr_fd = sys.stderr.fileno()
+        saved_fd = os.dup(stderr_fd)
+    except (AttributeError, OSError, ValueError):
+        yield
+        return
+
+    try:
+        with open(os.devnull, "w", encoding="utf-8") as devnull:
+            os.dup2(devnull.fileno(), stderr_fd)
+            yield
+    finally:
+        try:
+            os.dup2(saved_fd, stderr_fd)
+        finally:
+            os.close(saved_fd)
 
 
 def parse_labels(raw_labels):
@@ -249,8 +271,9 @@ def load_inference_model(model_path, num_threads=0):
         kwargs = {"model_path": model_path}
         if num_threads and num_threads > 0:
             kwargs["num_threads"] = int(num_threads)
-        interpreter = Interpreter(**kwargs)
-        interpreter.allocate_tensors()
+        with silence_native_stderr():
+            interpreter = Interpreter(**kwargs)
+            interpreter.allocate_tensors()
         input_details = interpreter.get_input_details()[0]
         output_details = interpreter.get_output_details()[0]
         input_shape = input_details.get("shape", [])
@@ -612,14 +635,16 @@ def main():
         output_segmentation_masks=False,
         num_poses=detect_people,
     )
-    pose_detector = vision.PoseLandmarker.create_from_options(pose_options)
+    with silence_native_stderr():
+        pose_detector = vision.PoseLandmarker.create_from_options(pose_options)
 
     hand_base = python.BaseOptions(model_asset_path=hand_model_path)
     hand_options = vision.HandLandmarkerOptions(
         base_options=hand_base,
         num_hands=detect_hands,
     )
-    hand_detector = vision.HandLandmarker.create_from_options(hand_options)
+    with silence_native_stderr():
+        hand_detector = vision.HandLandmarker.create_from_options(hand_options)
 
     pose_connections = [
         (11, 13),
