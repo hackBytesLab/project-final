@@ -134,6 +134,24 @@ def parse_env_bool(name, default=False):
     return default
 
 
+def resize_for_display(frame, display_width=0, display_height=0):
+    if display_width <= 0 and display_height <= 0:
+        return frame
+
+    src_h, src_w = frame.shape[:2]
+    if src_w <= 0 or src_h <= 0:
+        return frame
+
+    if display_width <= 0:
+        scale = display_height / float(src_h)
+        display_width = max(1, int(round(src_w * scale)))
+    elif display_height <= 0:
+        scale = display_width / float(src_w)
+        display_height = max(1, int(round(src_h * scale)))
+
+    return cv2.resize(frame, (int(display_width), int(display_height)), interpolation=cv2.INTER_AREA)
+
+
 def load_env_defaults():
     # Support both standard .env and existing .evnv files.
     for path in (".env", ".evnv"):
@@ -487,6 +505,24 @@ def main():
         help="Maximum people to visualize per frame.",
     )
     parser.add_argument(
+        "--display-width",
+        type=int,
+        default=parse_env_int("DISPLAY_WIDTH", 0),
+        help="Optional display width in pixels for the OpenCV preview window. 0 keeps original size.",
+    )
+    parser.add_argument(
+        "--display-height",
+        type=int,
+        default=parse_env_int("DISPLAY_HEIGHT", 0),
+        help="Optional display height in pixels for the OpenCV preview window. 0 keeps original size.",
+    )
+    parser.add_argument(
+        "--flip-vertical",
+        default=parse_env_bool("FLIP_VERTICAL", False),
+        action="store_true",
+        help="Flip the camera frame vertically before pose/hand detection and display.",
+    )
+    parser.add_argument(
         "--inference-mode",
         default=os.getenv("INFERENCE_MODE", "auto"),
         choices=["auto", "frame", "per-person"],
@@ -534,6 +570,8 @@ def main():
         help="Optional JSON containing per-class thresholds for inference.",
     )
     args = parser.parse_args()
+    if args.display_width < 0 or args.display_height < 0:
+        parser.error("--display-width and --display-height must be >= 0")
 
     # Feature and class config
     model_info = load_inference_model(args.model, num_threads=args.model_threads)
@@ -671,6 +709,8 @@ def main():
         f"detect_people={detect_people}, detect_hands={detect_hands}, "
         f"model_backend={model_info['backend']}, timesteps={model_timesteps}, "
         f"inference_mode={inference_mode}, normalize_geometry={args.normalize_geometry}, "
+        f"display_width={args.display_width or 'auto'}, display_height={args.display_height or 'auto'}, "
+        f"flip_vertical={args.flip_vertical}, "
         f"track_max_distance={args.track_max_distance}, track_max_missed={args.track_max_missed}, "
         f"thresholds_json={'on' if thresholds_map else 'off'}"
     )
@@ -679,6 +719,8 @@ def main():
         ret, frame = cap.read()
         if not ret:
             break
+        if args.flip_vertical:
+            frame = cv2.flip(frame, 0)
 
         h, w, _ = frame.shape
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
@@ -878,7 +920,8 @@ def main():
                     print("Invalid sequence shape:", seq.shape)
                 sequence_buffer = []
 
-        cv2.imshow("Pose + Hand Skeleton + Fall Detection", frame)
+        display_frame = resize_for_display(frame, args.display_width, args.display_height)
+        cv2.imshow("Pose + Hand Skeleton + Fall Detection", display_frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
