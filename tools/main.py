@@ -11,7 +11,14 @@ import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-from feature_layout import build_frame_features_with_options, resolve_feature_layout
+from feature_layout import (
+    build_frame_features_with_options,
+    resolve_feature_layout,
+    compute_num_features,
+    ENHANCED_EXTRA_FEATURES,
+    LEGACY_ENHANCED_EXTRA_FEATURES,
+    infer_enhancement_variant,
+)
 
 try:
     from Iriun_Webcam import get_iriun_camera
@@ -547,9 +554,20 @@ def main():
         max_people_arg=args.max_people,
         max_hands_arg=args.max_hands,
     )
+    base_features = compute_num_features(feature_max_people, feature_max_hands)
+    enhancement_variant = infer_enhancement_variant(num_features, base_features)
+    if enhancement_variant is None:
+        raise ValueError(
+            f"Unsupported feature layout for model={num_features} and base={base_features}."
+        )
     detect_people = max(feature_max_people, max(1, args.detect_people))
     supports_single_person_model = (
-        num_features == SINGLE_PERSON_FEATURES
+        num_features
+        in (
+            SINGLE_PERSON_FEATURES,
+            SINGLE_PERSON_FEATURES + LEGACY_ENHANCED_EXTRA_FEATURES,
+            SINGLE_PERSON_FEATURES + ENHANCED_EXTRA_FEATURES,
+        )
         and feature_max_people == 1
         and feature_max_hands == 2
     )
@@ -658,6 +676,7 @@ def main():
         f"detect_people={detect_people}, detect_hands={detect_hands}, "
         f"model_backend={model_info['backend']}, timesteps={model_timesteps}, "
         f"inference_mode={inference_mode}, normalize_geometry={args.normalize_geometry}, "
+        f"enhancement_variant={enhancement_variant}, "
         f"display_width={args.display_width or 'auto'}, display_height={args.display_height or 'auto'}, "
         f"flip_vertical={args.flip_vertical}, "
         f"track_max_distance={args.track_max_distance}, track_max_missed={args.track_max_missed}, "

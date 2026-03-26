@@ -14,6 +14,8 @@ from feature_layout import (
     enhance_sequence_features,
     compute_num_features,
     ENHANCED_EXTRA_FEATURES,
+    LEGACY_ENHANCED_EXTRA_FEATURES,
+    infer_enhancement_variant,
 )
 
 POSE_MODEL_PATH = 'models/pose_landmarker_lite.task'
@@ -84,15 +86,29 @@ def infer_on_video(
         max_hands_arg=max_hands_arg,
     )
     base_features = compute_num_features(max_people, max_hands)
+    enhancement_variant = infer_enhancement_variant(num_features, base_features)
+    if enhancement_variant is None:
+        raise ValueError(
+            f"Unsupported feature layout for model={num_features} and base={base_features}."
+        )
     enhanced_expected = base_features + ENHANCED_EXTRA_FEATURES
-    if enhance_features:
-        if num_features != enhanced_expected:
+    legacy_enhanced_expected = base_features + LEGACY_ENHANCED_EXTRA_FEATURES
+    use_summary_features = enhancement_variant == "full"
+    effective_enhance_features = enhance_features or enhancement_variant != "base"
+    if enhancement_variant != "base" and not enhance_features:
+        print(
+            f"[INFO] Auto-enabling enhanced features for {enhancement_variant} model layout "
+            f"({num_features} features)."
+        )
+    if effective_enhance_features:
+        if enhancement_variant == "base":
             raise ValueError(
-                f"Model features {num_features} do not match enhanced layout {enhanced_expected}. "
+                f"Model features {num_features} do not match enhanced layouts "
+                f"{legacy_enhanced_expected} (velocity) or {enhanced_expected} (full). "
                 "Use matching model or disable --enhance-features."
             )
     else:
-        if num_features != base_features:
+        if enhancement_variant != "base":
             print(
                 f"[WARN] Model features ({num_features}) exceed base layout ({base_features}). "
                 "Consider enabling --enhance-features."
@@ -145,8 +161,11 @@ def infer_on_video(
         return
 
     X = np.array(windows, dtype=np.float32)
-    if enhance_features:
-        X = np.stack([enhance_sequence_features(seq) for seq in X], axis=0)
+    if effective_enhance_features:
+        X = np.stack(
+            [enhance_sequence_features(seq, include_summary_features=use_summary_features) for seq in X],
+            axis=0,
+        )
     print('Prepared', X.shape[0], 'windows, running inference...')
 
     preds = []

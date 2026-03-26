@@ -9,7 +9,11 @@ import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-from feature_layout import build_frame_features_with_options, enhance_sequence_features
+from feature_layout import (
+    build_frame_features_with_options,
+    enhance_sequence_features,
+    infer_enhancement_variant,
+)
 from rule_fusion import DEFAULT_THRESHOLDS, fuse_rule_with_lstm, separate_prefall_falling
 
 
@@ -19,7 +23,6 @@ DEFAULT_HAND_MODEL = "models/hand_landmarker.task"
 DEFAULT_LABELS = "Fall,No_Fall,Pre-Fall,Falling"
 DEFAULT_TIMESTEPS = 30
 BASE_FEATURES = 150
-ENHANCED_FEATURES = 216
 
 
 def parse_labels(raw):
@@ -194,10 +197,12 @@ def main():
     model_info = load_tflite_interpreter(model_path, num_threads=args.model_threads)
     if model_info["timesteps"] != DEFAULT_TIMESTEPS:
         raise ValueError(f"Expected timesteps={DEFAULT_TIMESTEPS}, got {model_info['timesteps']}")
-    if model_info["num_features"] != ENHANCED_FEATURES:
+    enhancement_variant = infer_enhancement_variant(model_info["num_features"], BASE_FEATURES)
+    if enhancement_variant not in ("velocity", "full"):
         raise ValueError(
-            f"Expected enhanced feature count {ENHANCED_FEATURES}, got {model_info['num_features']}"
+            f"Expected enhanced feature count derived from base={BASE_FEATURES}, got {model_info['num_features']}"
         )
+    use_summary_features = enhancement_variant == "full"
 
     pose_detector, hand_detector = create_detectors(pose_model_path, hand_model_path)
     camera_info = open_camera(args)
@@ -213,7 +218,8 @@ def main():
 
     print(
         f"[Pi5 runtime] model={model_path} camera={args.camera} "
-        f"timesteps={model_info['timesteps']} features={model_info['num_features']}"
+        f"timesteps={model_info['timesteps']} features={model_info['num_features']} "
+        f"enhancement_variant={enhancement_variant}"
     )
 
     try:
@@ -243,10 +249,13 @@ def main():
 
             if len(sequence_buffer) == model_info["timesteps"] and (frame_count % max(1, args.infer_every) == 0):
                 sequence = np.asarray(sequence_buffer, dtype=np.float32)
-                enhanced_sequence = enhance_sequence_features(sequence)
-                if enhanced_sequence.shape != (DEFAULT_TIMESTEPS, ENHANCED_FEATURES):
+                enhanced_sequence = enhance_sequence_features(
+                    sequence,
+                    include_summary_features=use_summary_features,
+                )
+                if enhanced_sequence.shape != (DEFAULT_TIMESTEPS, model_info["num_features"]):
                     raise ValueError(
-                        f"Expected enhanced sequence shape {(DEFAULT_TIMESTEPS, ENHANCED_FEATURES)}, "
+                        f"Expected enhanced sequence shape {(DEFAULT_TIMESTEPS, model_info['num_features'])}, "
                         f"got {enhanced_sequence.shape}"
                     )
 

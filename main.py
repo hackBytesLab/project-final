@@ -18,6 +18,8 @@ from feature_layout import (
     compute_num_features,
     POSE_FEATURES_PER_PERSON,
     ENHANCED_EXTRA_FEATURES,
+    LEGACY_ENHANCED_EXTRA_FEATURES,
+    infer_enhancement_variant,
 )
 
 try:
@@ -583,22 +585,41 @@ def main():
         max_hands_arg=args.max_hands,
     )
     base_features = compute_num_features(feature_max_people, feature_max_hands)
+    enhancement_variant = infer_enhancement_variant(num_features, base_features)
+    if enhancement_variant is None:
+        raise ValueError(
+            f"Unsupported feature layout for model={num_features} and base={base_features}."
+        )
     enhanced_expected = base_features + ENHANCED_EXTRA_FEATURES
-    if args.enhance_features:
-        if num_features != enhanced_expected:
+    legacy_enhanced_expected = base_features + LEGACY_ENHANCED_EXTRA_FEATURES
+    use_summary_features = enhancement_variant == "full"
+    effective_enhance_features = args.enhance_features or enhancement_variant != "base"
+    if enhancement_variant != "base" and not args.enhance_features:
+        print(
+            f"[INFO] Auto-enabling enhanced features for {enhancement_variant} model layout "
+            f"({num_features} features)."
+        )
+    if effective_enhance_features:
+        if enhancement_variant == "base":
             raise ValueError(
-                f"Model expects {num_features} features but enhanced layout computes {enhanced_expected}. "
+                f"Model expects {num_features} features but enhanced layouts compute "
+                f"{legacy_enhanced_expected} (velocity) or {enhanced_expected} (full). "
                 "Use matching model or disable --enhance-features."
             )
     else:
-        if num_features != base_features:
+        if enhancement_variant != "base":
             print(
                 f"[WARN] Model features ({num_features}) exceed base layout ({base_features}). "
                 "Consider enabling --enhance-features to supply matching inputs."
             )
     detect_people = max(feature_max_people, max(1, args.detect_people))
     supports_single_person_model = (
-        num_features in (SINGLE_PERSON_FEATURES, SINGLE_PERSON_FEATURES + ENHANCED_EXTRA_FEATURES)
+        num_features
+        in (
+            SINGLE_PERSON_FEATURES,
+            SINGLE_PERSON_FEATURES + LEGACY_ENHANCED_EXTRA_FEATURES,
+            SINGLE_PERSON_FEATURES + ENHANCED_EXTRA_FEATURES,
+        )
         and feature_max_people == 1
         and feature_max_hands == 2
     )
@@ -609,8 +630,8 @@ def main():
 
     if inference_mode == "per-person" and not supports_single_person_model:
         raise ValueError(
-            "per-person mode requires a single-person model (150 features, 1 pose slot, 2 hand slots). "
-            "Use --inference-mode frame, or use a 150-feature model."
+            "per-person mode requires a single-person model (150/216/218 features, 1 pose slot, 2 hand slots). "
+            "Use --inference-mode frame, or use a compatible single-person model."
         )
 
     detect_hands = feature_max_hands
@@ -709,6 +730,8 @@ def main():
         f"detect_people={detect_people}, detect_hands={detect_hands}, "
         f"model_backend={model_info['backend']}, timesteps={model_timesteps}, "
         f"inference_mode={inference_mode}, normalize_geometry={args.normalize_geometry}, "
+        f"enhance_features={effective_enhance_features}, "
+        f"enhancement_variant={enhancement_variant}, "
         f"display_width={args.display_width or 'auto'}, display_height={args.display_height or 'auto'}, "
         f"flip_vertical={args.flip_vertical}, "
         f"track_max_distance={args.track_max_distance}, track_max_missed={args.track_max_missed}, "
@@ -805,8 +828,8 @@ def main():
 
                 if len(track_buffers[track_idx]) == model_timesteps:
                     seq = np.array(track_buffers[track_idx], dtype=np.float32)
-                    if args.enhance_features:
-                        seq = enhance_sequence_features(seq)
+                    if effective_enhance_features:
+                        seq = enhance_sequence_features(seq, include_summary_features=use_summary_features)
                     if seq.shape[1] == num_features:
                         probs = predict_sequence_with_score(model_info, seq)
                         smoothed_probs = smooth_probabilities(
@@ -874,8 +897,8 @@ def main():
 
             if len(sequence_buffer) == model_timesteps:
                 seq = np.array(sequence_buffer)
-                if args.enhance_features:
-                    seq = enhance_sequence_features(seq)
+                if effective_enhance_features:
+                    seq = enhance_sequence_features(seq, include_summary_features=use_summary_features)
                 if seq.shape[1] == num_features:
                     probs = predict_sequence_with_score(model_info, seq)
                     smoothed_probs = smooth_probabilities(

@@ -5,7 +5,10 @@ COORD_DIMS = 2
 POSE_FEATURES_PER_PERSON = POSE_LANDMARK_COUNT * COORD_DIMS
 HAND_FEATURES_PER_HAND = HAND_LANDMARK_COUNT * COORD_DIMS
 FEATURES_PER_PERSON = POSE_FEATURES_PER_PERSON + (2 * HAND_FEATURES_PER_HAND)
-ENHANCED_EXTRA_FEATURES = POSE_FEATURES_PER_PERSON + 2  # pose velocity (x,y) + trunk angle + hip height
+POSE_VELOCITY_FEATURES = POSE_FEATURES_PER_PERSON
+SUMMARY_FEATURES = 2  # trunk angle + hip height
+ENHANCED_EXTRA_FEATURES = POSE_VELOCITY_FEATURES + SUMMARY_FEATURES
+LEGACY_ENHANCED_EXTRA_FEATURES = POSE_VELOCITY_FEATURES
 
 
 def compute_num_features(max_people, max_hands=None):
@@ -26,10 +29,22 @@ def infer_people_from_num_features(num_features):
     return num_features // FEATURES_PER_PERSON
 
 
+def infer_enhancement_variant(num_features, base_features):
+    if num_features == base_features:
+        return "base"
+    if num_features == base_features + LEGACY_ENHANCED_EXTRA_FEATURES:
+        return "velocity"
+    if num_features == base_features + ENHANCED_EXTRA_FEATURES:
+        return "full"
+    return None
+
+
 def resolve_feature_layout(num_features, max_people_arg=0, max_hands_arg=0):
     """
     Returns (max_people, max_hands) while allowing enhanced feature vectors
-    that include pose velocity + trunk angle + hip height (i.e., base + ENHANCED_EXTRA_FEATURES).
+    that include either:
+    - pose velocity only (legacy Pi layout)
+    - pose velocity + trunk angle + hip height
     """
     inferred_people = infer_people_from_num_features(num_features)
     if max_people_arg > 0:
@@ -41,14 +56,15 @@ def resolve_feature_layout(num_features, max_people_arg=0, max_hands_arg=0):
 
     max_hands = max_hands_arg if max_hands_arg > 0 else max_people * 2
     expected_features = compute_num_features(max_people, max_hands)
-    if expected_features != num_features:
+    enhancement_variant = infer_enhancement_variant(num_features, expected_features)
+    if enhancement_variant is None:
+        legacy_expected = expected_features + LEGACY_ENHANCED_EXTRA_FEATURES
         enhanced_expected = expected_features + ENHANCED_EXTRA_FEATURES
-        if num_features != enhanced_expected:
-            raise ValueError(
-                "Model input features do not match requested layout: "
-                f"model={num_features}, expected={expected_features} or enhanced={enhanced_expected}, "
-                f"max_people={max_people}, max_hands={max_hands}"
-            )
+        raise ValueError(
+            "Model input features do not match requested layout: "
+            f"model={num_features}, expected={expected_features}, legacy_enhanced={legacy_expected}, "
+            f"enhanced={enhanced_expected}, max_people={max_people}, max_hands={max_hands}"
+        )
     return max_people, max_hands
 
 
@@ -122,11 +138,13 @@ def build_frame_features_with_options(
     return features
 
 
-def enhance_sequence_features(sequence):
+def enhance_sequence_features(sequence, include_summary_features=True):
     """
     Add temporal/dynamic features to a sequence of per-frame features.
     Input: sequence (T, F) where F includes pose+hands 2D coords (default 150).
-    Output: (T, F + pose_velocity(66) + trunk_angle(1) + hip_height(1)) => 218 when F=150.
+    Output:
+    - include_summary_features=True:  F + pose_velocity(66) + trunk_angle(1) + hip_height(1) => 218 when F=150
+    - include_summary_features=False: F + pose_velocity(66) => 216 when F=150
     """
     import numpy as np
 
@@ -161,5 +179,8 @@ def enhance_sequence_features(sequence):
         angles[i, 0] = np.degrees(np.arctan2(dx, dy + 1e-6))
         hip_heights[i, 0] = mid_hy
 
-    enhanced = np.concatenate([seq, pose_velocity, angles, hip_heights], axis=1)
+    extras = [seq, pose_velocity]
+    if include_summary_features:
+        extras.extend([angles, hip_heights])
+    enhanced = np.concatenate(extras, axis=1)
     return enhanced
