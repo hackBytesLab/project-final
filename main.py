@@ -250,6 +250,39 @@ def send_line_alert(channel_access_token, message, to_user_id=None, timeout=10):
         raise RuntimeError(f"LINE API connection error: {e}") from e
 
 
+class PiCamera2Capture:
+    def __init__(self, size=(1280, 720)):
+        try:
+            from picamera2 import Picamera2
+        except ImportError as e:
+            raise RuntimeError("picamera2 is not installed") from e
+
+        self._camera = Picamera2()
+        config = self._camera.create_preview_configuration(
+            main={"format": "RGB888", "size": tuple(size)}
+        )
+        self._camera.configure(config)
+        self._camera.start()
+        time.sleep(0.5)
+
+    def isOpened(self):
+        return True
+
+    def read(self):
+        try:
+            frame_rgb = self._camera.capture_array()
+            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+            return True, frame_bgr
+        except Exception:
+            return False, None
+
+    def release(self):
+        try:
+            self._camera.stop()
+        except Exception:
+            pass
+
+
 def open_camera(camera_mode, source):
     if camera_mode == "iriun":
         if get_iriun_camera is None:
@@ -262,10 +295,13 @@ def open_camera(camera_mode, source):
         return get_iriun_camera()
 
     if camera_mode == "pi":
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            raise RuntimeError("Cannot open Pi camera at index 0")
-        return cap
+        try:
+            return PiCamera2Capture()
+        except Exception:
+            cap = cv2.VideoCapture(0)
+            if not cap.isOpened():
+                raise RuntimeError("Cannot open Pi camera via picamera2 or camera index 0")
+            return cap
 
     if camera_mode == "rtsp":
         if not source:
