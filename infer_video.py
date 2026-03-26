@@ -20,12 +20,20 @@ from feature_layout import (
 
 POSE_MODEL_PATH = 'models/pose_landmarker_lite.task'
 HAND_MODEL_PATH = 'models/hand_landmarker.task'
+DISPLAY_LABEL_ALIASES = {
+    'falling': 'Pre-fall',
+}
+
+
+def normalize_display_label(label):
+    text = str(label).strip()
+    return DISPLAY_LABEL_ALIASES.get(text.lower(), text)
 
 
 def get_class_name(class_id, labels_map=None):
     if labels_map and class_id in labels_map:
-        return labels_map[class_id]
-    return str(class_id)
+        return normalize_display_label(labels_map[class_id])
+    return normalize_display_label(class_id)
 
 
 def sanitize_path_component(value):
@@ -334,7 +342,7 @@ def infer_on_video(
             cid, sfrm, efrm = seg
             scores = frame_scores[sfrm:efrm + 1]
             avg_score = float(np.mean([sc for sc in scores if sc > 0])) if any(sc > 0 for sc in scores) else 0.0
-            cls_name = labels_map[cid] if labels_map and cid in labels_map else str(cid)
+            cls_name = get_class_name(cid, labels_map)
             writer.writerow([cid, cls_name, sfrm / fps, efrm / fps, avg_score])
 
     print('Saved segments to', out_csv)
@@ -372,7 +380,7 @@ def infer_on_video(
             if i >= len(frame_labels):
                 break
             lbl = frame_labels[i]
-            txt = labels_map[lbl] if labels_map and lbl in labels_map else str(lbl)
+            txt = get_class_name(lbl, labels_map)
             cv2.putText(frame, txt, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
             out.write(frame)
             i += 1
