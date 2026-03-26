@@ -555,6 +555,12 @@ def main():
         help="Flip the camera frame vertically before pose/hand detection and display.",
     )
     parser.add_argument(
+        "--verbose-startup",
+        default=parse_env_bool("VERBOSE_STARTUP", False),
+        action="store_true",
+        help="Print startup configuration details such as camera mode, LINE status, and feature layout.",
+    )
+    parser.add_argument(
         "--inference-mode",
         default=os.getenv("INFERENCE_MODE", "auto"),
         choices=["auto", "frame", "per-person"],
@@ -748,27 +754,28 @@ def main():
     last_alert_time = 0.0
 
     cap = open_camera(args.camera, args.source)
-    print(f"Using camera mode: {args.camera}, source: {args.source}")
-    if args.line_token:
-        if args.line_user_id:
-            print("[LINE] Alert enabled via push API")
+    if args.verbose_startup:
+        print(f"Using camera mode: {args.camera}, source: {args.source}")
+        if args.line_token:
+            if args.line_user_id:
+                print("[LINE] Alert enabled via push API")
+            else:
+                print("[LINE] Alert enabled via broadcast API")
         else:
-            print("[LINE] Alert enabled via broadcast API")
-    else:
-        print("[LINE] Alert disabled (missing token)")
-    print(
-        f"[Feature layout] num_features={num_features}, "
-        f"max_people={feature_max_people}, max_hands={feature_max_hands}, "
-        f"detect_people={detect_people}, detect_hands={detect_hands}, "
-        f"model_backend={model_info['backend']}, timesteps={model_timesteps}, "
-        f"inference_mode={inference_mode}, normalize_geometry={args.normalize_geometry}, "
-        f"enhance_features={effective_enhance_features}, "
-        f"enhancement_variant={enhancement_variant}, "
-        f"display_width={args.display_width or 'auto'}, display_height={args.display_height or 'auto'}, "
-        f"flip_vertical={args.flip_vertical}, "
-        f"track_max_distance={args.track_max_distance}, track_max_missed={args.track_max_missed}, "
-        f"thresholds_json={'on' if thresholds_map else 'off'}"
-    )
+            print("[LINE] Alert disabled (missing token)")
+        print(
+            f"[Feature layout] num_features={num_features}, "
+            f"max_people={feature_max_people}, max_hands={feature_max_hands}, "
+            f"detect_people={detect_people}, detect_hands={detect_hands}, "
+            f"model_backend={model_info['backend']}, timesteps={model_timesteps}, "
+            f"inference_mode={inference_mode}, normalize_geometry={args.normalize_geometry}, "
+            f"enhance_features={effective_enhance_features}, "
+            f"enhancement_variant={enhancement_variant}, "
+            f"display_width={args.display_width or 'auto'}, display_height={args.display_height or 'auto'}, "
+            f"flip_vertical={args.flip_vertical}, "
+            f"track_max_distance={args.track_max_distance}, track_max_missed={args.track_max_missed}, "
+            f"thresholds_json={'on' if thresholds_map else 'off'}"
+        )
 
     while True:
         ret, frame = cap.read()
