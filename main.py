@@ -34,9 +34,6 @@ except ImportError:
 DEFAULT_LABELS = "Fall,No_Fall,Pre-Fall,Falling"
 TIMESTEPS = 30
 SINGLE_PERSON_FEATURES = 150
-DISPLAY_LABEL_ALIASES = {
-    "falling": "Pre-fall",
-}
 
 
 @contextmanager
@@ -68,15 +65,6 @@ def parse_labels(raw_labels):
 
 def parse_labels_or_empty(raw_labels):
     return [x.strip() for x in (raw_labels or "").split(",") if x.strip()]
-
-
-def normalize_display_label(label):
-    text = str(label).strip()
-    return DISPLAY_LABEL_ALIASES.get(text.lower(), text)
-
-
-def should_trigger_alert(raw_label, display_label, alert_classes):
-    return raw_label in alert_classes or display_label in alert_classes
 
 
 def load_thresholds_json(path):
@@ -951,8 +939,7 @@ def main():
                         gesture_id, gesture_score, used_threshold = select_class_with_thresholds(
                             smoothed_probs, label_names, thresholds_map
                         )
-                        raw_gesture_name = gesture_labels.get(gesture_id, str(gesture_id))
-                        gesture_name = normalize_display_label(raw_gesture_name)
+                        gesture_name = gesture_labels.get(gesture_id, str(gesture_id))
                         track_labels[track_idx] = f"{gesture_name} {gesture_score:.2f}"
                         if used_threshold:
                             print(
@@ -961,7 +948,7 @@ def main():
                         else:
                             print(f"Condition[P{track_idx + 1}]: {gesture_name} ({gesture_score:.2f})")
 
-                        if args.line_token and should_trigger_alert(raw_gesture_name, gesture_name, alert_classes):
+                        if args.line_token and gesture_name in alert_classes:
                             now = time.time()
                             if now - last_alert_time >= args.line_cooldown_seconds:
                                 alert_message = (
@@ -1021,14 +1008,13 @@ def main():
                     gesture_id, _, used_threshold = select_class_with_thresholds(
                         smoothed_probs, label_names, thresholds_map
                     )
-                    raw_gesture_name = gesture_labels.get(gesture_id, str(gesture_id))
-                    gesture_name = normalize_display_label(raw_gesture_name)
+                    gesture_name = gesture_labels.get(gesture_id, str(gesture_id))
                     if used_threshold:
                         print("Condition:", gesture_name, "[threshold]")
                     else:
                         print("Condition:", gesture_name)
 
-                    if args.line_token and should_trigger_alert(raw_gesture_name, gesture_name, alert_classes):
+                    if args.line_token and gesture_name in alert_classes:
                         now = time.time()
                         if now - last_alert_time >= args.line_cooldown_seconds:
                             alert_message = (
