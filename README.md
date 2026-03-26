@@ -450,34 +450,47 @@ Test scenarios:
 - Missing runtime dependency:
   - uninstall `mediapipe`/`tensorflow` on board and run without `--skip-install` (install step should recover)
 
-### 13.1 Export `.h5` to `.tflite` (recommended: `float16`)
+### 13.1 Export `.h5` to `.tflite` for Pi 5 (built-in ops only)
 
 ```bash
-python tools/export_tflite.py --keras-model models/lstm_fall_model_augsplit_acc_20260222_214000.h5 --output models/lstm_fall_model_augsplit_acc_20260222_214000_fp16.tflite --quantization float16 --select-tf-ops
+python tools/export_tflite.py --keras-model models/lstm_all_combined_216_sub8k_prefallboost.h5 --output models/lstm_all_combined_216_sub8k_prefallboost_pi5.tflite --quantization float16 --lite-friendly-rnn --fixed-timesteps 30 --require-builtins-only
 ```
 
-Optional `int8` export:
+What this does:
+- rebuilds the Sequential LSTM with fixed `30` timesteps
+- exports with `unroll=True` so the Pi 5 runtime can use built-in TFLite ops only
+- verifies that the final `.tflite` contains no Flex ops
+
+If you still want a generic TFLite export that allows Flex / `SELECT_TF_OPS`, use:
 
 ```bash
-python tools/export_tflite.py --keras-model models/lstm_fall_model_augsplit_acc_20260222_214000.h5 --output models/lstm_fall_model_augsplit_acc_20260222_214000_int8.tflite --quantization int8 --representative-x data_5fold_chunked_split/X.npy --representative-samples 256 --inference-input-type float32 --inference-output-type float32 --select-tf-ops
+python tools/export_tflite.py --keras-model models/lstm_all_combined_216_sub8k_prefallboost.h5 --output models/lstm_all_combined_216_sub8k_prefallboost.tflite --quantization float16 --select-tf-ops
 ```
 
 ### 13.2 Install runtime on Pi 5
 
 ```bash
-pip install tensorflow mediapipe opencv-python numpy
+pip install tflite-runtime mediapipe opencv-python numpy
 ```
 
 Notes:
-- This LSTM architecture requires `SELECT_TF_OPS` in TFLite conversion, so runtime should use `tensorflow` (Flex delegate available).
-- `tflite-runtime` only is usually not enough for this specific model.
+- For the new `*_pi5.tflite` export above, `tflite-runtime` is enough because it does not require Flex ops.
+- If you run an older `.tflite` exported with `--select-tf-ops`, install `tensorflow` instead of `tflite-runtime`.
 
-### 13.3 Run real-time on Pi 5 with TFLite
+### 13.3 Run real-time on Pi 5 with the Pi 5 TFLite runtime
 
 ```bash
-python main.py --camera pi --model models/lstm_fall_model_augsplit_acc_20260222_214000_fp16.tflite --model-threads 4 --labels Fall,No_Fall,Pre-Fall,Falling --thresholds-json work_csv/compare/recommended_thresholds_20260222_214000.json
+python pi5_runtime.py --camera picamera2
+```
+
+USB camera:
+
+```bash
+python pi5_runtime.py --camera index --camera-index 0
 ```
 
 Notes:
-- Keep the same feature setup as training (`--normalize-geometry`, labels order, timesteps).
-- Tune `--model-threads` (for Pi 5 usually `2-4` is a good range).
+- Default model is `models/lstm_all_combined_216_sub8k_prefallboost_pi5.tflite`
+- Expected input is fixed at `30 x 216`
+- The runtime applies the same enhanced feature pipeline used by this export path
+- Tune `--model-threads` (Pi 5 usually `2-4` is a good range)
