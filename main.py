@@ -177,6 +177,27 @@ def resize_for_display(frame, display_width=0, display_height=0):
     return cv2.resize(frame, (int(display_width), int(display_height)), interpolation=cv2.INTER_AREA)
 
 
+def init_preview_window(window_name, display_width=0, display_height=0):
+    try:
+        cv2.startWindowThread()
+    except cv2.error:
+        pass
+
+    try:
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        if display_width > 0 or display_height > 0:
+            width = max(1, int(display_width)) if display_width > 0 else 960
+            height = max(1, int(display_height)) if display_height > 0 else 540
+            cv2.resizeWindow(window_name, width, height)
+    except cv2.error as e:
+        display_value = os.getenv("DISPLAY", "")
+        xauthority_value = os.getenv("XAUTHORITY", "")
+        raise RuntimeError(
+            "Cannot open OpenCV preview window. "
+            f"DISPLAY='{display_value}' XAUTHORITY='{xauthority_value}'."
+        ) from e
+
+
 def load_env_defaults():
     # Support both standard .env and existing .evnv files.
     for path in (".env", ".evnv"):
@@ -752,8 +773,10 @@ def main():
     point_color = (0, 255, 0)
     alert_classes = set(parse_labels_or_empty(args.alert_classes))
     last_alert_time = 0.0
+    window_name = "Pose + Hand Skeleton + Fall Detection"
 
     cap = open_camera(args.camera, args.source)
+    init_preview_window(window_name, args.display_width, args.display_height)
     if args.verbose_startup:
         print(f"Using camera mode: {args.camera}, source: {args.source}")
         if args.line_token:
@@ -983,7 +1006,7 @@ def main():
                 sequence_buffer = []
 
         display_frame = resize_for_display(frame, args.display_width, args.display_height)
-        cv2.imshow("Pose + Hand Skeleton + Fall Detection", display_frame)
+        cv2.imshow(window_name, display_frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 

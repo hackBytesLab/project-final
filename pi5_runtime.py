@@ -48,6 +48,24 @@ def silence_native_stderr():
             os.close(saved_fd)
 
 
+def init_preview_window(window_name, width=960, height=540):
+    try:
+        cv2.startWindowThread()
+    except cv2.error:
+        pass
+
+    try:
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, max(1, int(width)), max(1, int(height)))
+    except cv2.error as e:
+        display_value = os.getenv("DISPLAY", "")
+        xauthority_value = os.getenv("XAUTHORITY", "")
+        raise RuntimeError(
+            "Cannot open OpenCV preview window. "
+            f"DISPLAY='{display_value}' XAUTHORITY='{xauthority_value}'."
+        ) from e
+
+
 def parse_labels(raw):
     labels = [item.strip() for item in str(raw or "").split(",") if item.strip()]
     if not labels:
@@ -232,6 +250,9 @@ def main():
 
     pose_detector, hand_detector = create_detectors(pose_model_path, hand_model_path)
     camera_info = open_camera(args)
+    window_name = "Pi 5 Fall Detection"
+    if not args.no_display:
+        init_preview_window(window_name, args.width, args.height)
 
     sequence_buffer = deque(maxlen=model_info["timesteps"])
     prob_history = deque(maxlen=max(1, int(args.smooth_window)))
@@ -330,7 +351,7 @@ def main():
                     (255, 255, 255),
                     2,
                 )
-                cv2.imshow("Pi 5 Fall Detection", frame_bgr)
+                cv2.imshow(window_name, frame_bgr)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
