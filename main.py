@@ -4,6 +4,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+import warnings
 
 import cv2
 import mediapipe as mp
@@ -248,12 +249,18 @@ def load_inference_model(model_path, num_threads=0):
     model_path_lower = str(model_path).strip().lower()
     if model_path_lower.endswith(".tflite"):
         try:
-            import tensorflow as tf
-
-            Interpreter = tf.lite.Interpreter
+            from tflite_runtime.interpreter import Interpreter
         except ImportError:
             try:
-                from tflite_runtime.interpreter import Interpreter
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message=r".*tf\.lite\.Interpreter is deprecated.*",
+                        category=UserWarning,
+                    )
+                    import tensorflow as tf
+
+                Interpreter = tf.lite.Interpreter
             except ImportError as e:
                 raise RuntimeError(
                     "Cannot import TFLite interpreter. Install tflite-runtime or tensorflow."
