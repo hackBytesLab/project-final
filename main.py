@@ -570,7 +570,7 @@ def main():
     )
     parser.add_argument(
         "--alert-classes",
-        default=os.getenv("ALERT_CLASSES", "Fall"),
+        default=os.getenv("ALERT_CLASSES", "Fall,Pre-Fall,Falling"),
         help="Comma-separated class names that should trigger LINE alerts.",
     )
     parser.add_argument(
@@ -810,7 +810,7 @@ def main():
 
     line_color = (0, 255, 0)
     point_color = (0, 255, 0)
-    alert_classes = set(parse_labels_or_empty(args.alert_classes))
+    alert_classes = {c.lower() for c in parse_labels_or_empty(args.alert_classes)}
     last_alert_time = 0.0
     window_name = "Pose + Hand Skeleton + Fall Detection"
 
@@ -948,7 +948,7 @@ def main():
                         else:
                             print(f"Condition[P{track_idx + 1}]: {gesture_name} ({gesture_score:.2f})")
 
-                        if args.line_token and gesture_name in alert_classes:
+                        if args.line_token and gesture_name.lower() in alert_classes:
                             now = time.time()
                             if now - last_alert_time >= args.line_cooldown_seconds:
                                 alert_message = (
@@ -1014,7 +1014,7 @@ def main():
                     else:
                         print("Condition:", gesture_name)
 
-                    if args.line_token and gesture_name in alert_classes:
+                    if args.line_token and gesture_name.lower() in alert_classes:
                         now = time.time()
                         if now - last_alert_time >= args.line_cooldown_seconds:
                             alert_message = (
